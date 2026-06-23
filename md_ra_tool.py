@@ -136,7 +136,7 @@ def T(s):
     return _TR.get(s, s)   # failsafe: unuebersetzt -> deutscher Text
 
 
-VERSION = "v5.32 (150. Version)"  # Engine v2 + Direktverbindung + Double-Read + Logs
+VERSION = "v5.33 (151. Version)"  # Engine v2 + Direktverbindung + Double-Read + Logs
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -2124,24 +2124,46 @@ def show_intro_html():
         return
     try:
         import threading
-        # HTML-Inhalt direkt laden (umgeht Windows file://-Pfadprobleme).
-        # base_url sorgt dafuer, dass relative Bezuege im HTML funktionieren.
         with open(html, "r", encoding="utf-8") as f:
             html_content = f.read()
-        base = "file:///" + SCRIPT_DIR.replace("\\", "/").rstrip("/") + "/"
+
+        # Steuerzustand zwischen JS-Signal, Sicherheits-Timer und Fenster
+        state = {"win": None, "closed": False}
+
+        def _close():
+            if state["closed"]:
+                return
+            state["closed"] = True
+            try:
+                state["win"].destroy()
+            except Exception:
+                pass
+
+        # Wird vom HTML aufgerufen, wenn die Animation komplett durch ist
+        # (window.pywebview.api.intro_fertig()).
+        class _Api:
+            def intro_fertig(self):
+                _close()
+
         win = webview.create_window(
             "", html=html_content,
             width=740, height=840, frameless=True,
-            resizable=False, on_top=True
+            resizable=False, on_top=True,
+            js_api=_Api()
         )
-        def closer():
+        state["win"] = win
+
+        # Sicherheits-Notausstieg: Falls das JS-Signal nie kommt (z.B. JS-Fehler
+        # oder sehr langsames WebView2), schliesst sich das Intro spaetestens
+        # nach MAX_INTRO Sekunden von selbst. Bei normalem Lauf greift vorher
+        # das intro_fertig()-Signal aus dem HTML.
+        MAX_INTRO = 40.0
+        def _watchdog():
             import time as _t
-            _t.sleep(12.0)
-            try:
-                win.destroy()
-            except Exception:
-                pass
-        threading.Thread(target=closer, daemon=True).start()
+            _t.sleep(MAX_INTRO)
+            _close()
+        threading.Thread(target=_watchdog, daemon=True).start()
+
         try:
             webview.start()
         except Exception:

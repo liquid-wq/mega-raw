@@ -185,6 +185,7 @@ function frame(ts){
     ctx.fillText('© Liqui',cx,cy+H*0.22);ctx.restore();
 
   if(t<DUR)requestAnimationFrame(frame);
+  else if(window.pywebview&&window.pywebview.api&&!window._introDone){window._introDone=true;window.pywebview.api.intro_fertig();}
 }
 function play(){t0=null;burstDone=false;bursts=[];shockT=null;initStars();requestAnimationFrame(frame);}
 function waitAndPlay(){if(framesReady>=12)play();else setTimeout(waitAndPlay,50);}
