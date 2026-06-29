@@ -156,6 +156,15 @@ angeschlossen. Konsole muss zum STARTEN des Tools nicht an sein, aber fuer den
 MONITOR schon. Wird das Kabel waehrend des Monitorings gezogen, zeigt das Tool
 "DISCONNECT" an.
 
+**Grafikfehler / Flackern bei einem bestimmten Spiel.**
+In seltenen Faellen ist der eingefuegte VBlank-Stub fuer ein besonders
+zeitkritisches Spiel zu gross und verursacht Grafikfehler (z. B. flackernde
+oder doppelte Bildteile). Loesung: dieses Spiel einzeln erneut patchen und vor
+dem Patchen die Checkbox **"Light-Stub"** aktivieren. Der Light-Stub verteilt
+das Auslesen des Speichers rotierend ueber mehrere Frames und senkt die Last pro
+Frame deutlich. Hinweis: Mit dem Light-Stub erscheint kein goldener TV-Blitz
+beim Unlock; Achievements und Spielerkennung funktionieren normal weiter.
+
 ---
 
 ## Voraussetzungen
@@ -360,6 +369,15 @@ The tool searches the COM port automatically — if none is found at all, the
 EverDrive's USB driver is usually missing, or the console/cable isn't connected.
 The console doesn't need to be on to START the tool, but it does for the MONITOR.
 If the cable is pulled during monitoring, the tool shows "DISCONNECT".
+
+**Graphics glitches / flicker in a particular game.**
+In rare cases the inserted VBlank stub is too large for an especially
+timing-critical game and causes graphics glitches (e.g. flickering or
+duplicated parts of the picture). Solution: re-patch that game individually and
+tick the **"Light stub"** checkbox before patching. The light stub spreads the
+memory read-out across multiple frames in rotation and significantly lowers the
+per-frame load. Note: with the light stub there is no golden TV flash on unlock;
+achievements and game detection keep working normally.
 
 ---
 
