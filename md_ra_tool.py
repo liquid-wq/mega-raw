@@ -136,13 +136,51 @@ def T(s):
     return _TR.get(s, s)   # failsafe: unuebersetzt -> deutscher Text
 
 
-VERSION = "v5.33 (151. Version)"  # Engine v2 + Direktverbindung + Double-Read + Logs
+# --- Light-Stub-Meldungen (einmal definiert -> Code + Uebersetzung identisch) ---
+# Gemeinsamer technischer Hinweis (Massen-Patch, SD-Export, Einzel-Patch).
+MSG_STUB_HINT = (
+    "Hinweis: In seltenen Faellen ist der eingefuegte VBlank-Stub fuer ein "
+    "besonders zeitkritisches Spiel zu gross und verursacht Grafikfehler "
+    "(Flackern). Solche Spiele einzeln erneut patchen und dabei den "
+    "LIGHT-STUB aktivieren. Der Light-Stub verteilt die RAM-Spiegelung "
+    "rotierend ueber mehrere Frames und senkt die VBlank-Last deutlich "
+    "(kein TV-Goldblitz).")
+MSG_LIGHT_LABEL = "Light-Stub (nur bei Grafikfehlern noetig)"
+MSG_LIGHT_TIP = (
+    "Light-Stub: verteilt die RAM-Spiegelung rotierend ueber mehrere Frames "
+    "-> deutlich weniger VBlank-Last, behebt Flackern bei zeitkritischen "
+    "Spielen. Kein TV-Goldblitz; Werte aktualisieren rotierend (fuer "
+    "Achievements irrelevant). Nur aktivieren, wenn ein Spiel mit dem "
+    "normalen Patch Grafikfehler zeigt.")
+MSG_LIGHT_ACTIVE = "\n\nLIGHT-Stub aktiv: kein TV-Goldblitz."
+_TR.update({
+    MSG_STUB_HINT: (
+        "Note: In rare cases the inserted VBlank stub is too large for an "
+        "especially timing-critical game and causes graphics glitches "
+        "(flicker). Re-patch such games one by one with the LIGHT STUB "
+        "enabled. The light stub spreads the RAM mirroring across multiple "
+        "frames in rotation and significantly lowers the VBlank load "
+        "(no TV gold flash)."),
+    MSG_LIGHT_LABEL: "Light stub (only needed on graphics glitches)",
+    MSG_LIGHT_TIP: (
+        "Light stub: spreads the RAM mirroring across multiple frames in "
+        "rotation -> much less VBlank load, fixes flicker on timing-critical "
+        "games. No TV gold flash; values update in rotation (irrelevant for "
+        "achievements). Only enable if a game shows graphics glitches with "
+        "the normal patch."),
+    MSG_LIGHT_ACTIVE: "\n\nLIGHT stub active: no TV gold flash.",
+})
+
+
+VERSION = "v5.62 (180. Version)"  # Light-Stub: Dispatch per Bitmaske (~14 Takte/Frame weniger)
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
     """Versionsnummer + uebersetzter buggy-Zusatz, je nach Sprache."""
     return VERSION + (VERSION_SUFFIX_DE if LANG == "de" else VERSION_SUFFIX_EN)
 STUB_GEN = 0x48  # Kennung die der Stub ins BRAM[197] schreibt (0x43 = Stub-Gen 4.3)
+# Alternativ-Stub (Light-Patch): Adressen pro Frame (Rest rotiert ueber Folge-Frames).
+STUB_SLIM_CHUNK = 1
 def _p(name):
     """Pfad neben dem Tool, unabhaengig vom Startverzeichnis."""
     return os.path.join(SCRIPT_DIR, name)
@@ -628,6 +666,77 @@ def build_stub(stub_addr, orig_vblank, addr_list, gameid=0):
     stub += bytes([0x4E,0x73])                                  # rte
     return stub
 
+def build_stub_slim(stub_addr, orig_vblank, addr_list, gameid=0):
+    """ALTERNATIV-STUB (Light-Patch) fuer Spiele mit extrem engem VBlank
+    (Grafikfehler/Flackern beim vollen Stub, z.B. Treasure-Titel). Spiegelt
+    pro Frame nur STUB_SLIM_CHUNK Adressen, rotierend ueber alle Frames,
+    jeweils in den FESTEN BRAM-Slot (PC liest exakt wie beim vollen Stub).
+    Minimaler Overhead -> deutlich weniger VBlank-Zeit. Kein MBX/CRAM ->
+    KEIN TV-Goldblitz. gameid bleibt erhalten (Auto-Erkennung). SRAM jeden
+    Frame (SRAM-Spiele kompatibel). Lesezeitpunkt VBlank-ENDE via Trampolin.
+    Werte aktualisieren rotierend (paar Frames Verzoegerung, fuer
+    Achievement-Polling irrelevant)."""
+    if gameid > 0xFFFF:
+        gameid = 0
+    CHUNK = max(1, STUB_SLIM_CHUNK)
+    slots = []
+    for ram_addr, nbytes in addr_list:
+        for b in range(nbytes):
+            slots.append(ram_addr + b)
+    if not slots:
+        slots = [0xFF0000]
+    TOTAL = len(slots)
+    G = (TOTAL + CHUNK - 1) // CHUNK
+    # Marker ueber die Rotations-Bloecke verteilen (kein Frame mit Lastspitze)
+    markers = [(0x2000C5, STUB_GEN), (0x2000C7, 0x00),
+               (0x2000CB, gameid & 0xFF), (0x2000CD, (gameid >> 8) & 0xFF)]
+    block_markers = {g: [] for g in range(G)}
+    for i, m in enumerate(markers):
+        block_markers[i % G].append(m)
+    part2 = stub_addr + 14
+    stub  = bytes([0x2F,0x3C]) + struct.pack(">I", part2)       # move.l #part2,-(sp)
+    stub += bytes([0x40,0xE7])                                  # move sr,-(sp)
+    stub += bytes([0x4E,0xF9]) + struct.pack(">I", orig_vblank) # jmp Original-Handler
+    # --- Dispatch: Frame-Zaehler (BRAM $200203), Wrap per Bitmaske ---
+    G2 = 1 << ((G - 1).bit_length()) if G > 1 else 1           # naechste 2er-Potenz >= G
+    disp  = bytes([0x48,0xE7,0x80,0xC0])                        # movem.l d0/a0-a1,-(a7)
+    disp += bytes([0x13,0xFC,0x00,0x01,0x00,0xA1,0x30,0x01])    # SRAM unlock (jeden Frame)
+    disp += bytes([0x41,0xF9]) + struct.pack(">I", 0x200001)    # lea ($200001),a0
+    disp += bytes([0x10,0x39]) + struct.pack(">I", 0x200203)    # move.b ($200203),d0
+    disp += bytes([0x52,0x00])                                  # addq.b #1,d0
+    disp += bytes([0x02,0x40]) + struct.pack(">H", G2 - 1)      # andi.w #(G2-1),d0 (Wrap + saeubert d0)
+    disp += bytes([0x13,0xC0]) + struct.pack(">I", 0x200203)    # move.b d0,($200203)
+    disp += bytes([0xE5,0x48])                                  # lsl.w #2,d0
+    jt_lea_pos = len(disp) + 2
+    disp += bytes([0x43,0xF9]) + struct.pack(">I", 0)           # lea JUMPTAB,a1 (Patch)
+    disp += bytes([0x22,0x71,0x00,0x00])                        # movea.l (a1,d0.w),a1
+    disp += bytes([0x4E,0xD1])                                  # jmp (a1)
+    # --- Rotations-Bloecke: je CHUNK Spiegelungen + ggf. ein Marker ---
+    base_blocks = part2 + len(disp)
+    block_addrs = []
+    blocks = bytearray()
+    jmp_exit_pos = []
+    for g in range(G):
+        block_addrs.append(base_blocks + len(blocks))
+        for k in range(g*CHUNK, min((g+1)*CHUNK, TOTAL)):
+            blocks += bytes([0x10,0x39]) + struct.pack(">I", slots[k])  # move.b (src),d0
+            blocks += bytes([0x11,0x40]) + struct.pack(">H", 2*k)       # move.b d0,(2k,a0)
+        for (maddr, mval) in block_markers[g]:
+            blocks += bytes([0x13,0xFC,0x00, mval & 0xFF]) + struct.pack(">I", maddr)
+        jmp_exit_pos.append(len(blocks) + 2)
+        blocks += bytes([0x4E,0xF9]) + struct.pack(">I", 0)             # jmp EXIT (Patch)
+    EXIT = base_blocks + len(blocks)
+    for pos in jmp_exit_pos:
+        blocks[pos:pos+4] = struct.pack(">I", EXIT)
+    exit_code  = bytes([0x4C,0xDF,0x03,0x01])                  # movem.l (a7)+,d0/a0-a1
+    exit_code += bytes([0x4E,0x73])                            # rte
+    JUMPTAB = EXIT + len(exit_code)
+    disp = bytearray(disp)
+    disp[jt_lea_pos:jt_lea_pos+4] = struct.pack(">I", JUMPTAB)
+    # Sprungtabelle auf G2 (2er-Potenz): Phantom-Eintraege G..G2-1 -> EXIT (No-op-Frame)
+    jt = b"".join(struct.pack(">I", a) for a in (block_addrs + [EXIT] * (G2 - G)))
+    return stub + bytes(disp) + bytes(blocks) + exit_code + jt
+
 def check_compat(rom_path, achievements=None):
     """Statische Kompatibilitaetspruefung. Liefert (ok, zeilen)."""
     with open(rom_path, "rb") as f:
@@ -1112,8 +1221,18 @@ class App(tk.Tk):
                   bg=self.C["bg"], relief="flat", cursor="hand2",
                   command=self._open_options).place(relx=0.97, y=12, anchor="ne")
         # Schnellstart fuer neue Nutzer
-        tk.Label(self, text=T("Schnellstart:  1. Einloggen   2. ROM einmalig auswaehlen + patchen   3. Spiel starten   4. Monitor starten"),
-                 font=("Courier",8), fg=self.C["green"], bg=self.C["bg"]).pack(pady=(0,6))
+        # wraplength wird unten dynamisch an die Fensterbreite gekoppelt, damit
+        # die Zeile auf schmalen/hochskalierten Bildschirmen (z.B. Surface)
+        # umbricht statt abgeschnitten zu werden.
+        self._quickstart = tk.Label(self, text=T("Schnellstart:  1. Einloggen   2. ROM einmalig auswaehlen + patchen   3. Spiel starten   4. Monitor starten"),
+                 font=("Courier",8), fg=self.C["green"], bg=self.C["bg"],
+                 justify="center", wraplength=700)
+        self._quickstart.pack(pady=(0,6), fill="x")
+        # Umbruchbreite an die jeweilige Fensterbreite anpassen
+        def _wrap_quickstart(event):
+            if event.widget is self:
+                self._quickstart.configure(wraplength=max(300, event.width - 40))
+        self.bind("<Configure>", _wrap_quickstart)
         # Statuszeile zuerst und am unteren Rand verankert -> immer sichtbar
         engv = getattr(racond, "ENGINE_VERSION", "ALT (v1?) — ra_condition.py aktualisieren!")
         self.log = tk.StringVar(value=f"Bereit. {version_str()} | Engine {engv} — Datei: {os.path.abspath(__file__)}")
@@ -1167,6 +1286,15 @@ class App(tk.Tk):
         self.hash_st_lbl.pack(side="left",padx=8)
 
     def _buttons(self):
+        # Light-Stub-Auswahl (Standard: voller Stub) + kurze Hinweiszeile
+        self.use_light = tk.BooleanVar(value=False)
+        hr = tk.Frame(self, bg=self.C["bg"]); hr.pack(fill="x", padx=15, pady=(2,0))
+        cbx = tk.Checkbutton(hr, text=T(MSG_LIGHT_LABEL), variable=self.use_light,
+                             bg=self.C["bg"], fg=self.C["gray"], selectcolor=self.C["panel"],
+                             font=("Courier",8), activebackground=self.C["bg"],
+                             activeforeground=self.C["fg"])
+        cbx.pack(side="left")
+        add_tip(cbx, MSG_LIGHT_TIP)
         r = tk.Frame(self,bg=self.C["bg"]); r.pack(fill="x",padx=15,pady=4)
         self.patch_btn = tk.Button(r,text=T("IPS PATCH ERSTELLEN"),font=("Courier",8,"bold"),
                                    fg=self.C["blue"],bg=self.C["panel"],relief="flat",cursor="hand2",
@@ -1524,6 +1652,13 @@ class App(tk.Tk):
         # KRIKzz-Methode: VBlank-Vektor umleiten statt Handler patchen
         orig_vblank = struct.unpack_from(">I", orig, 0x78)[0]
         needed = 60 + 10 * sum(n for _, n in self.game["addr_list"]) + 100
+        # Light-Stub-Auswahl aus der Checkbox (Standard: voller Stub)
+        use_slim = bool(self.use_light.get())
+        build_fn = build_stub_slim if use_slim else build_stub
+        if use_slim:
+            probe = build_stub_slim(0x200000, orig_vblank, self.game["addr_list"],
+                                    self.game.get("gameid", 0))
+            needed = max(needed, len(probe) + 32)   # Light-Stub ist groesser
         rom_end = rom_end_from_header(orig)
         if h in HOOK_DB and HOOK_DB[h].get("stub"):
             stub_addr, outside = HOOK_DB[h]["stub"], False
@@ -1532,7 +1667,7 @@ class App(tk.Tk):
         if not stub_addr:
             messagebox.showerror(T("Fehler"),T("Kein Platz fuer Stub (ROM > 4MB?).")); return
 
-        stub = build_stub(stub_addr, orig_vblank, self.game["addr_list"], self.game.get("gameid", 0))
+        stub = build_fn(stub_addr, orig_vblank, self.game["addr_list"], self.game.get("gameid", 0))
         patches = [(0x78, struct.pack(">I", stub_addr)),  # VBlank-Vektor → Stub
                    (stub_addr, stub)]
         if not outside:
@@ -1563,8 +1698,10 @@ class App(tk.Tk):
             json.dump(gc, open(_p("games_cache.json"),"w",encoding="utf-8"), indent=1)
         except Exception:
             pass
-        self.log.set(f"IPS: {os.path.basename(ips_path)} (Stub {len(stub)}B)")
-        messagebox.showinfo(T("Fertig"),T("IPS erstellt:\n{}\n\nAuf SD-Karte neben die ROM.").format(ips_path))
+        self.log.set(f"IPS: {os.path.basename(ips_path)} (Stub {len(stub)}B{', LIGHT' if use_slim else ''})")
+        messagebox.showinfo(T("Fertig"),
+            T("IPS erstellt:\n{}\n\nAuf SD-Karte neben die ROM.").format(ips_path)
+            + (T(MSG_LIGHT_ACTIVE) if use_slim else ""))
 
     def _batch_patch(self):
         if not self.ra_token:
@@ -1575,6 +1712,7 @@ class App(tk.Tk):
             "Original-RAR/ZIP nach erfolgreichem Entpacken loeschen?\n\n"
             "Ja = Archiv wird geloescht, sobald die ROM daneben liegt.\n"
             "Nein = Archive bleiben erhalten.")
+        messagebox.showinfo(T("Hinweis"), T(MSG_STUB_HINT))
         threading.Thread(target=self._batch_patch_t, args=(folder, del_arc), daemon=True).start()
 
     def _batch_patch_t(self, folder, del_arc=False):
@@ -1807,6 +1945,8 @@ class App(tk.Tk):
         tk.Label(win,textvariable=logv,bg=self.C["bg"],fg=self.C["gold"],font=("Courier",8)).pack(anchor="w",padx=8,pady=4)
         start_btn = tk.Button(win,text=T("START"),font=("Courier",8,"bold"),fg=self.C["cyan"],bg=self.C["bg"])
         def run():
+            if do_ips.get():
+                messagebox.showinfo(T("Hinweis"), T(MSG_STUB_HINT))
             start_btn.config(state="disabled", text=T("LAEUFT..."))
             threading.Thread(target=self._sd_export_t,
                 args=(src,dst,do_ips.get(),do_bucket.get(),scheme.get(),logv,win,del_arc.get(),start_btn),
