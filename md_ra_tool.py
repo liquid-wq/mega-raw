@@ -15,7 +15,7 @@ Kein offizielles RetroAchievements-Produkt.
 
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import hashlib, struct, os, threading, time, json, subprocess
+import hashlib, struct, os, sys, threading, time, json, subprocess, tempfile
 import urllib.request, urllib.parse, urllib.error
 from capstone import *
 import ra_condition as racond
@@ -74,8 +74,8 @@ _TR = {
     "Quell-Archiv (RAR/ZIP) nach Entpacken loeschen":
         "Delete source archive (RAR/ZIP) after extraction",
     "Granularitaet:": "Granularity:",
-    "Schnellstart:  1. Einloggen   2. ROM einmalig auswaehlen + patchen   3. Spiel starten   4. Monitor starten":
-        "Quick start:  1. Log in   2. Select + patch the ROM once   3. Start the game   4. Start monitor",
+    "Schnellstart:  1. Einloggen   2. Spiel einmalig patchen   3. Spiel starten   4. Monitor starten":
+        "Quick start:  1. Log in   2. Patch the game once   3. Start the game   4. Start monitor",
     "Verbinde...": "Connecting...",
     "Ko-fi\n\naber falls du darueber nachdenkst,\nlies bitte 'about the cat'": "Ko-fi\n\nbut if you're thinking about it,\nplease read 'about the cat'",
     # Statuszeilen / Meldungen (haeufig)
@@ -105,8 +105,8 @@ _TR = {
     "Zuerst ein ROM laden (DURCHSUCHEN).": "Load a ROM first (BROWSE).",
     "Bitte zuerst einloggen, dann ROM laden.": "Please log in first, then load a ROM.",
     "Spiel erkannt, aber nicht eingeloggt": "Game detected, but not logged in",
-    "auto-erkannt — ROM-Datei unbekannt (einmal manuell laden fuellt das Gedaechtnis)":
-        "auto-detected — ROM file unknown (load once manually to fill memory)",
+    "auto-erkannt — Achievements laufen automatisch (Zusatz-Infos erscheinen, sobald das Spiel einmal gepatcht wurde)":
+        "auto-detected — achievements run automatically (extra info appears once the game has been patched)",
     # Tooltips
     "EIN Spiel waehlen (ROM/ZIP/RAR), pruefen und einzeln patchen.":
         "Select ONE game (ROM/ZIP/RAR), check and patch it individually.",
@@ -141,9 +141,9 @@ def T(s):
 MSG_STUB_HINT = (
     "Hinweis: In seltenen Faellen ist der eingefuegte VBlank-Stub fuer ein "
     "besonders zeitkritisches Spiel zu gross und verursacht Grafikfehler "
-    "(Flackern). Solche Spiele einzeln erneut patchen und dabei den "
-    "LIGHT-STUB aktivieren. Der Light-Stub verteilt die RAM-Spiegelung "
-    "rotierend ueber mehrere Frames und senkt die VBlank-Last deutlich "
+    "(Flackern). Solche Spiele muessen einzeln mit dem LIGHT-STUB erneut "
+    "gepatcht werden. Der Light-Stub verteilt die RAM-Spiegelung rotierend "
+    "ueber mehrere Frames und senkt die VBlank-Last deutlich "
     "(kein TV-Goldblitz).")
 MSG_LIGHT_LABEL = "Light-Stub (nur bei Grafikfehlern noetig)"
 MSG_LIGHT_TIP = (
@@ -157,10 +157,10 @@ _TR.update({
     MSG_STUB_HINT: (
         "Note: In rare cases the inserted VBlank stub is too large for an "
         "especially timing-critical game and causes graphics glitches "
-        "(flicker). Re-patch such games one by one with the LIGHT STUB "
-        "enabled. The light stub spreads the RAM mirroring across multiple "
-        "frames in rotation and significantly lowers the VBlank load "
-        "(no TV gold flash)."),
+        "(flicker). Such games must be re-patched individually with the "
+        "LIGHT STUB. The light stub spreads the RAM mirroring across "
+        "multiple frames in rotation and significantly lowers the VBlank "
+        "load (no TV gold flash)."),
     MSG_LIGHT_LABEL: "Light stub (only needed on graphics glitches)",
     MSG_LIGHT_TIP: (
         "Light stub: spreads the RAM mirroring across multiple frames in "
@@ -169,10 +169,12 @@ _TR.update({
         "achievements). Only enable if a game shows graphics glitches with "
         "the normal patch."),
     MSG_LIGHT_ACTIVE: "\n\nLIGHT stub active: no TV gold flash.",
+    "ABBRECHEN": "CANCEL",
+    "BRECHE AB...": "CANCELLING...",
 })
 
 
-VERSION = "v5.62 (180. Version)"  # Light-Stub: Dispatch per Bitmaske (~14 Takte/Frame weniger)
+VERSION = "v5.83 (201. Version)"  # Text: "unserer Engine" -> "der Engine"
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -426,19 +428,79 @@ def extract_archive_rom(arc, dest_dir=None):
     return out
 
 
-def bucket_for(filename, scheme="A-E"):
-    """Ordner-Bucket fuer EverDrive-Struktur. scheme bestimmt Granularitaet."""
-    ch = os.path.basename(filename)[:1].upper()
-    if not ch.isalpha():
-        return "0-9"
-    if scheme == "A-Z":
-        return ch
-    # Default 5er-Bloecke: A-E F-J K-O P-T U-Z
-    blocks = [("A","E"),("F","J"),("K","O"),("P","T"),("U","Z")]
-    for lo, hi in blocks:
-        if lo <= ch <= hi:
-            return f"{lo}-{hi}"
-    return "0-9"
+# EverDrive-Menue (Krikzz-Handbuch CORE/PRO, Stand 2026): bei aktiver Sortierung
+# max. 800 sichtbare Eintraege je Ordner. Jedes gepatchte Spiel belegt 2 Eintraege
+# (ROM + .ips), ungepatchte 1.
+EVERDRIVE_FOLDER_LIMIT = 800
+
+def _entry_count(items):
+    return sum(2 if ips else 1 for _, ips in items)
+
+def _key2(rom, n=2):
+    s = os.path.splitext(os.path.basename(rom))[0].upper()
+    s = "".join(c for c in s if c.isalnum())
+    return (s or "0")[:n]
+
+def _letter_of(rom):
+    c = os.path.basename(rom)[:1].upper()
+    return c if c.isalpha() else "0-9"   # Ziffern/Symbole -> eigener Ordner "0-9"
+
+def _subsplit(items, limit):
+    """Ein einzelner Buchstabe ist zu gross -> in Teilstuecke <= limit teilen,
+    benannt nach 2-Zeichen-Praefix (z.B. SA-SM / SN-SZ). Paare bleiben zusammen."""
+    chunks, cur, n = [], [], 0
+    for rom, ips in items:
+        e = 2 if ips else 1
+        if cur and n + e > limit:
+            chunks.append(cur); cur, n = [], 0
+        cur.append((rom, ips)); n += e
+    if cur: chunks.append(cur)
+    out = []
+    for ch in chunks:
+        lo, hi = _key2(ch[0][0]), _key2(ch[-1][0])
+        out.append((lo if lo == hi else f"{lo}-{hi}", ch))
+    return out
+
+def _letter_groups(placed, limit=EVERDRIVE_FOLDER_LIMIT):
+    """Sortiert alphabetisch in 'von-bis'-Ordner, aber IMMER an Buchstabengrenzen:
+    ein Buchstabe wird nie ueber zwei Ordner verstreut. Ganze Buchstaben werden
+    gierig zusammengelegt, solange die Summe <= limit bleibt; nur wenn ein
+    EINZELNER Buchstabe > limit ist, wird genau dieser feiner geteilt. ROM/.ips
+    zaehlen zusammen (2 Eintraege) und bleiben stets im selben Ordner.
+    Liefert Liste (ordnername, items)."""
+    from collections import OrderedDict
+    buckets = OrderedDict()
+    for rom, ips in placed:
+        buckets.setdefault(_letter_of(rom), []).append((rom, ips))
+    groups = []
+    cur_items, cur_letters, cur_n = [], [], 0
+    def flush():
+        nonlocal cur_items, cur_letters, cur_n
+        if cur_items:
+            name = cur_letters[0] if len(cur_letters) == 1 else f"{cur_letters[0]}-{cur_letters[-1]}"
+            groups.append((name, cur_items))
+            cur_items, cur_letters, cur_n = [], [], 0
+    for L, items in buckets.items():
+        n = _entry_count(items)
+        if L == "0-9":                       # Ziffern/Symbole: eigener Ordner
+            flush()
+            groups.extend(_subsplit(items, limit) if n > limit else [("0-9", items)])
+            continue
+        if n > limit:                        # einzelner Buchstabe zu gross -> teilen
+            flush(); groups.extend(_subsplit(items, limit)); continue
+        if cur_items and cur_n + n > limit:  # naechster Buchstabe passt nicht mehr
+            flush()
+        cur_items += items; cur_letters.append(L); cur_n += n
+    flush()
+    # Namen eindeutig machen (Failsafe gegen Kollisionen)
+    seen, final = {}, []
+    for name, items in groups:
+        if name in seen:
+            seen[name] += 1; name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+        final.append((name, items))
+    return final
 
 
 def patch_rom_file(rom_path, game):
@@ -1224,7 +1286,7 @@ class App(tk.Tk):
         # wraplength wird unten dynamisch an die Fensterbreite gekoppelt, damit
         # die Zeile auf schmalen/hochskalierten Bildschirmen (z.B. Surface)
         # umbricht statt abgeschnitten zu werden.
-        self._quickstart = tk.Label(self, text=T("Schnellstart:  1. Einloggen   2. ROM einmalig auswaehlen + patchen   3. Spiel starten   4. Monitor starten"),
+        self._quickstart = tk.Label(self, text=T("Schnellstart:  1. Einloggen   2. Spiel einmalig patchen   3. Spiel starten   4. Monitor starten"),
                  font=("Courier",8), fg=self.C["green"], bg=self.C["bg"],
                  justify="center", wraplength=700)
         self._quickstart.pack(pady=(0,6), fill="x")
@@ -1239,7 +1301,7 @@ class App(tk.Tk):
         tk.Label(self, textvariable=self.log, font=("Courier",8),
                  fg=self.C["gray"], bg=self.C["bg"], wraplength=700).pack(side="bottom", pady=4)
         self._panel("LOGIN", self._login_ui)
-        self._panel("ROM", self._rom_ui)
+        self._panel("PATCH", self._rom_ui)
         self._buttons()   # direkt unter ROM, wie urspruenglich
         self._panel("LIVE BRAM", self._bram_ui)
         self._panel("ACHIEVEMENTS", self._ac_ui, expand=True)
@@ -1708,14 +1770,55 @@ class App(tk.Tk):
             messagebox.showwarning(T("Hinweis"),T("Bitte zuerst einloggen.")); return
         folder = filedialog.askdirectory(title="Ordner mit ROMs/Archiven waehlen")
         if not folder: return
-        del_arc = messagebox.askyesno("Archive loeschen?",
-            "Original-RAR/ZIP nach erfolgreichem Entpacken loeschen?\n\n"
-            "Ja = Archiv wird geloescht, sobald die ROM daneben liegt.\n"
-            "Nein = Archive bleiben erhalten.")
-        messagebox.showinfo(T("Hinweis"), T(MSG_STUB_HINT))
-        threading.Thread(target=self._batch_patch_t, args=(folder, del_arc), daemon=True).start()
+        win = tk.Toplevel(self); win.title("ORDNER PATCHEN"); win.configure(bg=self.C["bg"])
+        win.transient(self); win.lift(); win.focus_force()   # ueber dem Hauptfenster
+        del_arc = tk.BooleanVar(value=False)
+        tk.Label(win,text=f"Ordner: {folder}",bg=self.C["bg"],fg=self.C["green"],
+                 font=("Courier",8),justify="left").pack(anchor="w",padx=8,pady=4)
+        def _confirm_del_arc():
+            if del_arc.get():   # nur beim AKTIVIEREN nachfragen
+                if not messagebox.askyesno("Sicher?",
+                        "Sind Sie sicher, dass das Quell-Archiv (RAR/ZIP) nach dem "
+                        "Entpacken geloescht werden soll?\n\n"
+                        "Das Original auf dem PC ist danach weg."):
+                    del_arc.set(False)
+        cb = tk.Checkbutton(win,text=T("Quell-Archiv (RAR/ZIP) nach Entpacken loeschen"),
+                       variable=del_arc,bg=self.C["bg"],fg=self.C["red"],command=_confirm_del_arc,
+                       selectcolor=self.C["bg"],font=("Courier",8)); cb.pack(anchor="w",padx=8)
+        pv = tk.StringVar(value="")
+        tk.Label(win,textvariable=pv,bg=self.C["bg"],fg=self.C["gold"],
+                 font=("Courier",8),justify="left").pack(anchor="w",padx=8,pady=6)
+        pbtn = tk.Button(win,text=T("START"),font=("Courier",8,"bold"),
+                 fg=self.C["cyan"],bg=self.C["bg"])
+        def run():
+            cb.config(state="disabled")
+            pbtn.config(state="disabled", text=T("LAEUFT..."))
+            threading.Thread(target=self._batch_patch_t,
+                             args=(folder, del_arc.get(), pv, win, pbtn), daemon=True).start()
+        pbtn.config(command=run); pbtn.pack(anchor="w",padx=8,pady=6)
+        self._center_over(win)
 
-    def _batch_patch_t(self, folder, del_arc=False):
+    def _center_over(self, win):
+        """Fenster mittig ueber das Hauptfenster setzen (statt oben links)."""
+        try:
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            px, py = self.winfo_rootx(), self.winfo_rooty()
+            pw, ph = self.winfo_width(), self.winfo_height()
+            x = px + max(0, (pw - w)//2); y = py + max(0, (ph - h)//2)
+            win.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+    def _batch_patch_t(self, folder, del_arc=False, pv=None, pwin=None, pbtn=None):
+        def _pset(msg):
+            if pv is not None: self.after(0, pv.set, msg)
+        def _pfin(msg):
+            _pset(msg)
+            def _f():
+                try: pbtn.config(state="normal", text=T("SCHLIESSEN"), command=pwin.destroy)
+                except Exception: pass
+            if pbtn is not None and pwin is not None: self.after(0, _f)
         exts = (".md",".bin",".gen",".smd",".zip",".rar")
         files = [os.path.join(folder,f) for f in sorted(os.listdir(folder))
                  if f.lower().endswith(exts)]
@@ -1732,6 +1835,7 @@ class App(tk.Tk):
         for i, f in enumerate(files, 1):
             base = os.path.basename(f)
             self.after(0,self.log.set,f"[{i}/{len(files)}] {base} ...")
+            _pset(f"[{i}/{len(files)}]\n{base}")
             try:
                 rom = f
                 if f.lower().endswith((".zip",".rar")):
@@ -1771,6 +1875,7 @@ class App(tk.Tk):
                                    f"Spaeter erneut (Cache + gepatchte werden uebersprungen).\n")
                         logf.close()
                         self.after(0,self.log.set,"RA-Drossel — Batch gestoppt (siehe batch_log.txt)")
+                        _pfin(f"RA-Drossel — gestoppt.\nBis hier gepatcht: {ok}\nSpaeter erneut ausfuehren.")
                         self.after(0,lambda: messagebox.showwarning("Rate-Limit",
                             f"RetroAchievements drosselt anhaltend.\n\n"
                             f"Bis hier gepatcht: {ok}\n\n"
@@ -1893,6 +1998,7 @@ class App(tk.Tk):
         nset = len(reasons["kein_set"]); nreg = len(reasons["unsupported_version"])
         nunk = len(reasons["unbekannt"]); nerr = len(reasons["kein_platz"])+len(reasons["fehler"])+len(reasons["archiv"])
         self.after(0,self.log.set,f"Batch fertig: {ok} gepatcht — Details in batch_log.txt")
+        _pfin(f"FERTIG: {ok} gepatcht, {skip} schon vorhanden")
         self.after(0,lambda: messagebox.showinfo("Batch-Patch",
             f"{ok} ROMs gepatcht, {skip} schon vorhanden\n\n"
             f"Nicht gepatcht (legitim):\n"
@@ -1911,49 +2017,66 @@ class App(tk.Tk):
         dst = filedialog.askdirectory(title="ZIEL: EverDrive-SD (Export)")
         if not dst: return
         win = tk.Toplevel(self); win.title(T("SD-EXPORT")); win.configure(bg=self.C["bg"])
+        win.transient(self)             # bleibt ueber dem Hauptfenster
+        win.lift(); win.focus_force()   # sofort in den Vordergrund
         do_ips = tk.BooleanVar(value=True)
         do_bucket = tk.BooleanVar(value=True)
         del_arc = tk.BooleanVar(value=False)   # Standard: Archive BEHALTEN (sicher)
-        scheme = tk.StringVar(value="A-E")
         tk.Label(win,text=f"Quelle: {src}\nZiel: {dst}",bg=self.C["bg"],fg=self.C["green"],
                  font=("Courier",8),justify="left").pack(anchor="w",padx=8,pady=4)
         cb1 = tk.Checkbutton(win,text=T("IPS gleich miterstellen"),variable=do_ips,bg=self.C["bg"],
                        fg=self.C["green"],selectcolor=self.C["bg"],font=("Courier",8)); cb1.pack(anchor="w",padx=8)
-        cb2 = tk.Checkbutton(win,text=T("In Buchstaben-Ordner sortieren (EverDrive-Dateilimit)"),
+        cb2 = tk.Checkbutton(win,text=T("In Ordner sortieren (automatisch, EverDrive-Dateilimit)"),
                        variable=do_bucket,bg=self.C["bg"],fg=self.C["green"],
                        selectcolor=self.C["bg"],font=("Courier",8)); cb2.pack(anchor="w",padx=8)
+        def _confirm_del_arc():
+            if del_arc.get():   # nur beim AKTIVIEREN nachfragen
+                if not messagebox.askyesno("Sicher?",
+                        "Sind Sie sicher, dass das Quell-Archiv (RAR/ZIP) nach dem "
+                        "Entpacken geloescht werden soll?\n\n"
+                        "Das Original auf dem PC ist danach weg."):
+                    del_arc.set(False)   # abgelehnt -> Haken zurueck
         cb3 = tk.Checkbutton(win,text=T("Quell-Archiv (RAR/ZIP) nach Entpacken loeschen"),
-                       variable=del_arc,bg=self.C["bg"],fg=self.C["red"],
+                       variable=del_arc,bg=self.C["bg"],fg=self.C["red"],command=_confirm_del_arc,
                        selectcolor=self.C["bg"],font=("Courier",8)); cb3.pack(anchor="w",padx=8)
         add_tip(cb1, "Erstellt fuer jede kopierte ROM gleich die IPS-Patchdatei im Ziel. "
                      "Ohne Haken werden ROMs nur kopiert, nicht gepatcht.")
-        add_tip(cb2, "Legt im Ziel Ordner wie A-E, F-J an und sortiert die Spiele hinein. "
-                     "Verhindert, dass das EverDrive-Menue bei zu vielen Dateien pro Ordner "
-                     "Spiele nicht mehr anzeigt.")
+        add_tip(cb2, "Sortiert die Spiele automatisch in 'von-bis'-Ordner und fuellt jeden "
+                     "nur bis zum EverDrive-Menuelimit (21 Eintraege/Seite x 40 Seiten = 840 "
+                     "Eintraege je Ordner). ROM und .ips zaehlen zusammen und bleiben immer "
+                     "im selben Ordner. So versteckt das Menue keine Spiele mehr.")
         add_tip(cb3, "ACHTUNG: Loescht das originale RAR/ZIP, nachdem die ROM erfolgreich "
                      "ins Ziel kopiert wurde. Nur einschalten, wenn du die Archive nicht "
                      "mehr brauchst. Standard: aus.")
-        sr = tk.Frame(win,bg=self.C["bg"]); sr.pack(anchor="w",padx=8)
-        tk.Label(sr,text=T("Granularitaet:"),bg=self.C["bg"],fg=self.C["green"],font=("Courier",8)).pack(side="left")
-        for s in ("A-E","A-Z"):
-            tk.Radiobutton(sr,text=s,variable=scheme,value=s,bg=self.C["bg"],fg=self.C["green"],
-                           selectcolor=self.C["bg"],font=("Courier",8)).pack(side="left")
-        add_tip(sr, "A-E: 5er-Gruppen (A-E, F-J, ...) — wenige Ordner, ~100 Spiele je Ordner. "
-                    "A-Z: ein Ordner je Buchstabe — mehr Ordner, weniger Spiele je Ordner. "
-                    "Bei sehr grossen Sammlungen A-Z waehlen.")
         logv = tk.StringVar(value="")
         tk.Label(win,textvariable=logv,bg=self.C["bg"],fg=self.C["gold"],font=("Courier",8)).pack(anchor="w",padx=8,pady=4)
+        stop = threading.Event()
         start_btn = tk.Button(win,text=T("START"),font=("Courier",8,"bold"),fg=self.C["cyan"],bg=self.C["bg"])
+        def do_cancel():
+            stop.set()
+            try: start_btn.config(state="disabled", text=T("BRECHE AB..."))
+            except Exception: pass
         def run():
-            if do_ips.get():
-                messagebox.showinfo(T("Hinweis"), T(MSG_STUB_HINT))
-            start_btn.config(state="disabled", text=T("LAEUFT..."))
+            stop.clear()
+            start_btn.config(text=T("ABBRECHEN"), command=do_cancel)
             threading.Thread(target=self._sd_export_t,
-                args=(src,dst,do_ips.get(),do_bucket.get(),scheme.get(),logv,win,del_arc.get(),start_btn),
+                args=(src,dst,do_ips.get(),do_bucket.get(),logv,win,del_arc.get(),start_btn,stop),
                 daemon=True).start()
+        def on_close():
+            # Fenster schliessen = laufenden Export wirklich stoppen (nicht heimlich
+            # weiterlaufen lassen). Worker beendet sauber und schliesst das Fenster.
+            stop.set()
+            if start_btn["text"] in (T("START"), T("SCHLIESSEN")):
+                win.destroy()           # laeuft gerade nichts -> sofort zu
+            else:
+                win._closing = True     # Worker schliesst nach sauberem Abbruch
+                try: start_btn.config(state="disabled", text=T("BRECHE AB..."))
+                except Exception: pass
+        win.protocol("WM_DELETE_WINDOW", on_close)
         start_btn.config(command=run); start_btn.pack(anchor="w",padx=8,pady=6)
+        self._center_over(win)
 
-    def _sd_export_t(self, src, dst, do_ips, do_bucket, scheme, logv, win, del_arc=False, start_btn=None):
+    def _sd_export_t(self, src, dst, do_ips, do_bucket, logv, win, del_arc=False, start_btn=None, stop=None):
         import shutil
         exts = (".md",".bin",".gen",".smd",".zip",".rar")
         # Rekursiv suchen — ROMs liegen oft in Unterordnern
@@ -1966,53 +2089,198 @@ class App(tk.Tk):
         if not files:
             self.after(0,logv.set,"KEINE ROMs/Archive im Quellordner gefunden (auch nicht in Unterordnern)")
             return
-        # Ziel == Quelle? Dann wuerde in sich selbst kopiert
         if os.path.abspath(dst) == os.path.abspath(src):
             self.after(0,logv.set,"FEHLER: Quelle und Ziel sind identisch — bitte anderes Ziel waehlen")
             return
-        copied = ips = fail = skip = 0
+        # --- Pass 1: flach ins Staging kopieren + patchen ---
+        staging = os.path.join(dst, "_mega_raw_tmp")
+        os.makedirs(staging, exist_ok=True)
+        placed = []   # (rom_path_im_staging, ips_path|None)
+        copied = ips = fail = skip = deferred = 0
+        n_unknown = n_noset = n_unsupported = n_luecke = 0
+        problems = []   # nur Spiele MIT RA-Set, die NICHT gepatcht wurden (Name, Grund)
+        ra_throttled = False   # nach erster anhaltender RA-Drossel: keine RA-Anfragen mehr
         for i, f in enumerate(files, 1):
+            if stop is not None and stop.is_set():
+                break
             base = os.path.basename(f)
             self.after(0,logv.set,f"[{i}/{len(files)}] {base}")
             try:
                 rom = f
                 was_archive = f.lower().endswith((".zip",".rar"))
-                tmp_extracted = None
                 if was_archive:
-                    rom = extract_archive_rom(f, dest_dir=os.path.dirname(f))
-                    if not rom: fail += 1; continue
-                    tmp_extracted = rom
-                target_dir = dst
-                if do_bucket:
-                    target_dir = os.path.join(dst, bucket_for(rom, scheme))
-                    os.makedirs(target_dir, exist_ok=True)
-                dst_rom = os.path.join(target_dir, os.path.basename(rom))
-                if os.path.abspath(dst_rom) == os.path.abspath(rom):
-                    skip += 1; continue   # identischer Pfad
-                shutil.copy2(rom, dst_rom); copied += 1
-                # Quell-Archiv loeschen NUR wenn: Option an, war Archiv, ROM ist
-                # nachweislich im Ziel angekommen.
-                if del_arc and was_archive and os.path.exists(dst_rom):
+                    # Archiv in EIGENEN Temp-Ordner entpacken (NIE in den Quellordner),
+                    # nur die ROM ins Staging holen, Temp danach restlos loeschen.
+                    # Der PC-Quellordner behaelt so nur die RAR/ZIP.
+                    tdir = tempfile.mkdtemp(dir=dst, prefix="_mraw_x_")
                     try:
-                        os.remove(f)
-                        # die temporaer entpackte ROM neben dem Archiv auch weg
-                        if tmp_extracted and os.path.exists(tmp_extracted) \
-                           and os.path.abspath(tmp_extracted) != os.path.abspath(dst_rom):
-                            os.remove(tmp_extracted)
-                    except OSError:
-                        pass
+                        ext = extract_archive_rom(f, dest_dir=tdir)
+                        if not ext:
+                            fail += 1; continue
+                        dst_rom = os.path.join(staging, os.path.basename(ext))
+                        if os.path.exists(dst_rom):
+                            skip += 1; continue
+                        shutil.move(ext, dst_rom)
+                    finally:
+                        shutil.rmtree(tdir, ignore_errors=True)
+                    copied += 1
+                    if del_arc:
+                        try: os.remove(f)          # nur das Original-Archiv (optional)
+                        except OSError: pass
+                else:
+                    dst_rom = os.path.join(staging, os.path.basename(rom))
+                    if os.path.abspath(dst_rom) == os.path.abspath(rom):
+                        skip += 1; continue
+                    if os.path.exists(dst_rom):     # gleicher Dateiname schon da
+                        skip += 1; continue
+                    shutil.copy2(rom, dst_rom); copied += 1
+                ips_path = None
                 if do_ips:
-                    h = md5_file(dst_rom); gid = ra_gameid(h)
-                    if gid:
-                        game = build_game(gid, h, self.user.get(), self.ra_token)
-                        if game and game.get("addr_list"):
-                            good, _, _ = patch_rom_file(dst_rom, game)
-                            if good: ips += 1
+                    h = md5_file(dst_rom)
+                    gc = _cache()["gameid"]
+                    gid = None; proceed = True
+                    if h in gc:
+                        gid = gc[h] or None          # gecacht: sofort, keine RA-Anfrage
+                    elif ra_throttled:
+                        deferred += 1; proceed = False   # Drosselzustand: NICHT mehr anfragen
+                    else:
+                        time.sleep(RA_REQUEST_PAUSE)     # feste Server-Schonung
+                        try:
+                            gid = ra_gameid(h, raise_limit=True)
+                        except RateLimited as rl:
+                            # EIN Mal Retry-After abwarten (RA Zeit geben), dann EIN
+                            # Retry. Bleibt es gedrosselt -> ab hier fuer den REST des
+                            # Exports keine RA-Anfragen mehr (jede Anfrage im Drossel-
+                            # zustand verlaengert sonst das Wartefenster).
+                            wait = min(rl.retry_after or 30, 60)
+                            self.after(0,logv.set,
+                                f"[{i}/{len(files)}] RA drosselt — warte {wait}s, dann Rest offen lassen...")
+                            gid = None
+                            if not (stop is not None and stop.wait(wait)):
+                                try: gid = ra_gameid(h, raise_limit=True)
+                                except RateLimited: gid = None
+                            if gid is None:
+                                ra_throttled = True; deferred += 1; proceed = False
+                    if proceed and gid:
+                        if ra_throttled and str(gid) not in _cache()["patch"]:
+                            deferred += 1                # Drosselzustand: Patch nicht abrufen
+                        else:
+                            if str(gid) not in _cache()["patch"]:
+                                time.sleep(RA_REQUEST_PAUSE)   # 2. Anfrage pacen
+                            try:
+                                game = build_game(gid, h, self.user.get(), self.ra_token)
+                            except RateLimited:
+                                ra_throttled = True; deferred += 1; game = "DEFER"
+                            if game == "DEFER":
+                                pass                              # schon als offen gezaehlt
+                            elif game and game.get("no_set"):
+                                n_unsupported += 1                # RA kennt Spiel, aber diese ROM-Version hat kein Set
+                            elif (not game) or (not game.get("addr_list")):
+                                if (game or {}).get("raw_core", 0) == 0:
+                                    n_noset += 1                  # Spiel in RA, aber 0 Achievements (berechtigt leer)
+                                else:
+                                    n_luecke += 1                 # Set da, Engine konnte nicht parsen (unser Thema)
+                                    problems.append((base,
+                                        f"Set vorhanden ({game.get('raw_core',0)} Achievements), "
+                                        f"aber Engine parste keine Adresse"))
+                            else:
+                                good, msg, _ = patch_rom_file(dst_rom, game)
+                                if good:
+                                    cand = os.path.splitext(dst_rom)[0] + ".ips"
+                                    if os.path.exists(cand):
+                                        ips_path = cand; ips += 1
+                                else:
+                                    fail += 1
+                                    problems.append((base, msg or "Patch fehlgeschlagen (meist kein Platz im ROM)"))
+                    elif proceed and gid is None:
+                        n_unknown += 1                            # ROM-Hash RA unbekannt
+                placed.append((dst_rom, ips_path))
             except Exception as e:
                 self.after(0,logv.set,f"{base}: {e}"); fail += 1
-        self.after(0,logv.set,f"FERTIG: {copied} kopiert, {ips} mit IPS, {skip} uebersprungen, {fail} Fehler  (Quelle: {len(files)} gefunden)")
-        if start_btn is not None:
-            self.after(0, lambda: start_btn.config(state="normal", text=T("SCHLIESSEN"), command=win.destroy))
+        # --- Pass 2: zaehlen, gruppieren, verschieben (auch bei Abbruch: das
+        #     bereits Kopierte wird sauber einsortiert -> keine Waisen) ---
+        cancelled = bool(stop is not None and stop.is_set())
+        head = "ABGEBROCHEN" if cancelled else "FERTIG"
+        moved = 0
+        if do_bucket:
+            self.after(0,logv.set,"Sortiere in Ordner und verschiebe...")
+            placed.sort(key=lambda t: os.path.basename(t[0]).lower())
+            groups = _letter_groups(placed)
+            total = len(placed); spin = "|/-\\"
+            for name, group in groups:
+                folder = os.path.join(dst, name)
+                os.makedirs(folder, exist_ok=True)
+                for rom, ips_path in group:
+                    for p in (rom, ips_path):
+                        if not p: continue
+                        tgt = os.path.join(folder, os.path.basename(p))
+                        if os.path.abspath(tgt) != os.path.abspath(p):
+                            try: os.replace(p, tgt)
+                            except OSError: shutil.move(p, tgt)
+                    moved += 1
+                    if moved % 10 == 0:
+                        self.after(0,logv.set,
+                            f"Sortiere und verschiebe... {spin[(moved//10)%4]} {moved*100//total}%")
+            self.after(0,logv.set,
+                f"{head}: {copied} kopiert, {ips} mit IPS, {moved} Spiele in {len(groups)} Ordner "
+                f"(max {EVERDRIVE_FOLDER_LIMIT}/Ordner), {skip} uebersprungen, {fail} Fehler"
+                + (f" | {deferred} wegen RA-Drossel offen -> SD-Export erneut ausfuehren (Cache macht es schnell)" if deferred else ""))
+        else:
+            total = len(placed); spin = "|/-\\"
+            for rom, ips_path in placed:
+                for p in (rom, ips_path):
+                    if not p: continue
+                    tgt = os.path.join(dst, os.path.basename(p))
+                    if os.path.abspath(tgt) != os.path.abspath(p):
+                        try: os.replace(p, tgt)
+                        except OSError: shutil.move(p, tgt)
+                moved += 1
+                if moved % 10 == 0:
+                    self.after(0,logv.set,
+                        f"Verschiebe... {spin[(moved//10)%4]} {moved*100//total}%")
+            self.after(0,logv.set,
+                f"{head}: {copied} kopiert, {ips} mit IPS, {skip} uebersprungen, {fail} Fehler"
+                + (f" | {deferred} wegen RA-Drossel offen -> SD-Export erneut ausfuehren (Cache macht es schnell)" if deferred else ""))
+        # Staging entfernen (sollte leer sein)
+        try: os.rmdir(staging)
+        except OSError: pass
+        # Fenster: hat der Nutzer das X gedrueckt -> schliessen; sonst Ergebnis
+        # stehen lassen und Knopf auf SCHLIESSEN setzen.
+        def _finish():
+            try:
+                if getattr(win, "_closing", False):
+                    win.destroy()
+                elif start_btn is not None:
+                    start_btn.config(state="normal", text=T("SCHLIESSEN"), command=win.destroy)
+            except Exception:
+                pass
+        self.after(0, _finish)
+        log_hint = ""
+        if problems:
+            try:
+                lp = os.path.join(dst, "mega_raw_nicht_gepatcht.txt")
+                with open(lp, "w", encoding="utf-8") as lf:
+                    lf.write("Spiele MIT RetroAchievements-Set, die NICHT gepatcht wurden:\n")
+                    lf.write("(alles andere ohne Set ist normal und hier absichtlich nicht gelistet)\n\n")
+                    for nm, gr in problems:
+                        lf.write(f"{nm}  —  {gr}\n")
+                log_hint = f"\n\nListe der {len(problems)} Spiele mit Set, die NICHT gepatcht wurden:\n{lp}"
+            except OSError:
+                pass
+        if do_ips and not cancelled:
+            self.after(0, lambda: messagebox.showinfo("SD-Export",
+                f"{ips} Spiele mit Achievements gepatcht"
+                + (f", {skip} schon vorhanden (uebersprungen)" if skip else "")
+                + "\n\nNicht gepatcht — alles normal, kein Fehler:\n"
+                f"  {n_noset} in RA gelistet, aber (noch) ohne Achievements\n"
+                f"  {n_unsupported} kein Set fuer genau diese ROM-Version\n"
+                f"       (Beta / Proto / andere Region)\n"
+                f"  {n_unknown} ROM von RA nicht erkannt (Bad Dump / Hack / Homebrew)\n\n"
+                f"Set vorhanden, aber von der Engine (noch) nicht abgedeckt: {n_luecke}\n"
+                f"Echte Fehler (meist kein Platz im ROM fuer den Stub): {fail}"
+                + log_hint
+                + (f"\n\n{deferred} wegen RA-Drossel offen -> SD-Export erneut ausfuehren "
+                   f"(Cache macht es schnell)" if deferred else "")))
 
     def _toggle_mon(self):
         if self.monitoring:
@@ -2192,7 +2460,7 @@ class App(tk.Tk):
                 self.compat_var.set(gc["compat_block"] + "\n(Stand: letzte IPS-Erstellung)")
                 self.compat_lbl.config(fg=self.C["green"])
         else:
-            self.rom_lbl.config(text=T("auto-erkannt — ROM-Datei unbekannt (einmal manuell laden fuellt das Gedaechtnis)"))
+            self.rom_lbl.config(text=T("auto-erkannt — Achievements laufen automatisch (Zusatz-Infos erscheinen, sobald das Spiel einmal gepatcht wurde)"))
         threading.Thread(target=self._load_achievements, daemon=True).start()
 
     def _unlock(self, ac):
@@ -2304,8 +2572,17 @@ def show_intro_html():
             _close()
         threading.Thread(target=_watchdog, daemon=True).start()
 
+        # Festes WebView2-Profil statt eines temporaeren: dann muss pywebview
+        # beim Schliessen nichts loeschen -> die harmlose, aber irritierende
+        # "Failed to delete user data folder / lockfile"-Meldung entfaellt.
+        # (private_mode=False + fester storage_path; Profil wird wiederverwendet.)
+        wv_store = os.path.join(tempfile.gettempdir(), "mega_raw_webview")
         try:
-            webview.start()
+            webview.start(private_mode=False, storage_path=wv_store)
+        except TypeError:
+            # Aeltere pywebview-Version ohne diese Parameter -> normaler Start
+            try: webview.start()
+            except Exception: pass
         except Exception:
             pass
     except Exception:
@@ -2316,6 +2593,20 @@ def show_intro_html():
 
 
 if __name__ == "__main__":
-    show_intro_html()      # HTML-Animation im Fenster (pywebview), dann Tool
+    # Intro-Modus: nur die Animation zeigen und beenden (eigener Prozess).
+    if "--intro" in sys.argv:
+        show_intro_html()
+        sys.exit(0)
+    # Das Intro (WebView2) initialisiert COM des Prozesses so, dass danach der
+    # Windows-ORDNER-Dialog (askdirectory -> Ordner-Patch/SD-Export) haengt,
+    # der Datei-Dialog aber nicht. Loesung: Intro in EIGENEM Prozess starten;
+    # dann stirbt dieser COM-Zustand mit dem Intro und der Hauptprozess bleibt
+    # sauber. Schlaegt der Start fehl, wird das Intro einfach uebersprungen.
+    try:
+        _flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.run([sys.executable, os.path.abspath(__file__), "--intro"],
+                       timeout=60, creationflags=_flags)
+    except Exception:
+        pass
     app = App()
     app.mainloop()
