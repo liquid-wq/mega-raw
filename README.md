@@ -185,6 +185,13 @@ beim Unlock; Achievements und Spielerkennung funktionieren normal weiter.
 4. Spiel auf der Konsole starten, im Tool MONITOR STARTEN
 5. Spielen — Achievements schalten sich live frei
 
+**Ganzer Ordner / SD-Export:** Beim Patchen ganzer Ordner oder beim SD-Export
+sortiert das Tool die Spiele automatisch in Buchstaben-Ordner (max. 800 Dateien
+pro Ordner, ein Buchstabe wird nie geteilt) und zeigt am Ende eine Aufschluesselung.
+Spiele mit RA-Set, die nicht gepatcht werden konnten (meist kein Platz im ROM),
+landen in `mega_raw_nicht_gepatcht.txt` auf der SD. Spiele ohne Set sind normal
+und werden dort nicht gelistet.
+
 ## PAL / NTSC
 
 Einige Sets verlangen 60 Hz (NTSC). Auf einer 50-Hz-PAL-Konsole sind diese
@@ -398,6 +405,13 @@ achievements and game detection keep working normally.
 3. Put the ROM AND the generated `.ips` together on the EverDrive SD card
 4. Start the game on the console, click START MONITOR in the tool
 5. Play — achievements unlock live
+
+**Whole folder / SD export:** When patching a whole folder or exporting to SD,
+the tool auto-sorts games into letter folders (max. 800 files per folder, a letter
+is never split) and shows a breakdown at the end. Games with an RA set that could
+not be patched (usually no room in the ROM) are written to
+`mega_raw_nicht_gepatcht.txt` on the SD. Games without a set are normal and are
+not listed there.
 
 ## PAL / NTSC
 
