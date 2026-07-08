@@ -175,6 +175,7 @@ _TR.update({
 
 
 VERSION = "v5.84 (202. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
+CURRENT_BUILD = 202
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -1096,6 +1097,24 @@ class App(tk.Tk):
         self.C = {"bg":"#0a0a0f","panel":"#12121a","gold":"#f0c040","blue":"#4080ff",
                   "green":"#40c060","red":"#e04040","gray":"#606080","fg":"#d0d0e0","cyan":"#40d0d0"}
         self._build()
+        self.after(2000, self._check_update)
+
+    def _check_update(self):
+        threading.Thread(target=self._check_update_worker, daemon=True).start()
+
+    def _check_update_worker(self):
+        try:
+            req = urllib.request.Request("https://liquid-wq.github.io/support/version.txt")
+            with urllib.request.urlopen(req, timeout=8) as r:
+                remote = int(r.read().decode("utf-8").strip())
+            if remote > CURRENT_BUILD:
+                msg = (f"A new version is available (build {remote}, you have build {CURRENT_BUILD}).\n\n"
+                       "Visit the support page to download.") if LANG == "en" else \
+                      (f"Eine neue Version ist verfuegbar (Build {remote}, du hast Build {CURRENT_BUILD}).\n\n"
+                       "Besuche die Support-Seite zum Download.")
+                self.after(0, lambda: messagebox.showinfo(T("Hinweis"), msg))
+        except Exception:
+            pass
 
     def _panel(self, title, fn, expand=False):
         f = tk.Frame(self, bg=self.C["panel"], padx=10, pady=6)
