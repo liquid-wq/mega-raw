@@ -77,7 +77,7 @@ _TR = {
     "Schnellstart:  1. Einloggen   2. Spiel einmalig patchen   3. Spiel starten   4. Monitor starten":
         "Quick start:  1. Log in   2. Patch the game once   3. Start the game   4. Start monitor",
     "Verbinde...": "Connecting...",
-    "Ko-fi\n\naber falls du darueber nachdenkst,\nlies bitte 'about the cat'": "Ko-fi\n\nbut if you're thinking about it,\nplease read 'about the cat'",
+    "Support\n\naber falls du darueber nachdenkst,\nlies bitte 'about the cat'": "Support\n\nbut if you're thinking about it,\nplease read 'about the cat'",
     # Statuszeilen / Meldungen (haeufig)
     "Bitte zuerst einloggen.": "Please log in first.",
     "Hinweis": "Notice",
@@ -174,7 +174,7 @@ _TR.update({
 })
 
 
-VERSION = "v5.83 (201. Version)"  # Text: "unserer Engine" -> "der Engine"
+VERSION = "v5.84 (202. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -645,10 +645,14 @@ def find_stub_addr(data, needed):
     # dort BRAM ein — Lehre aus Dynamite Headdy). Lineare ROMs duerfen bis 4MB
     # anhaengen (Lehre aus Gargoyles 3MB: kein Banking, voller linearer Raum).
     ceiling = 0x200000 if banking else 0x400000
-    # 1) Standard: hinter dem Dateiende anhaengen (ausserhalb jeder Checksum)
-    addr = (len(data) + 0xF) & ~0xF
-    if addr + needed <= ceiling:
-        return addr, True
+    # 1) Standard: hinter dem Dateiende anhaengen (ausserhalb jeder Checksum) —
+    # ausser die ROM ist bereits exakt eine Zweierpotenz (EverDrive laedt dann
+    # nur diese Groesse, ein Stub dahinter waere unsichtbar -> Black Screen).
+    is_pow2 = len(data) > 0 and (len(data) & (len(data)-1)) == 0
+    if not is_pow2:
+        addr = (len(data) + 0xF) & ~0xF
+        if addr + needed <= ceiling:
+            return addr, True
     # 2) Padding am Dateiende (Checksum-Patch noetig)
     j = len(data)
     while j > 0 and data[j-1] in (0x00, 0xFF):
@@ -1172,16 +1176,16 @@ class App(tk.Tk):
         tk.Button(win, text=T("SPEICHERN"), font=("Courier",9,"bold"), fg=self.C["cyan"],
                   bg=self.C["panel"], command=save).pack(pady=12)
 
-        # Ko-fi-Link
-        def open_kofi():
+        # Support-Link
+        def open_support():
             import webbrowser
-            try: webbrowser.open("https://ko-fi.com/liqui69747")
+            try: webbrowser.open("https://liquid-wq.github.io/support/")
             except Exception: pass
-        kofi_lbl = tk.Label(win, text=T("Ko-fi\n\naber falls du darueber nachdenkst,\nlies bitte 'about the cat'"),
+        support_lbl = tk.Label(win, text=T("Support\n\naber falls du darueber nachdenkst,\nlies bitte 'about the cat'"),
                   font=("Courier",9), fg=self.C["gray"], bg=self.C["bg"],
                   cursor="hand2", wraplength=400, justify="center")
-        kofi_lbl.pack(pady=(12,2))
-        kofi_lbl.bind("<Button-1>", lambda e: open_kofi())
+        support_lbl.pack(pady=(12,2))
+        support_lbl.bind("<Button-1>", lambda e: open_support())
 
         # "about the cat" — Aufklaerung + Widmung
         def open_cat_thing():
