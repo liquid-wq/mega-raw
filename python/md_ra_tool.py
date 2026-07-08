@@ -174,8 +174,8 @@ _TR.update({
 })
 
 
-VERSION = "v5.84 (202. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
-CURRENT_BUILD = 202
+VERSION = "v5.85 (203. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
+CURRENT_BUILD = 203
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -1104,7 +1104,7 @@ class App(tk.Tk):
 
     def _check_update_worker(self):
         try:
-            req = urllib.request.Request("https://liquid-wq.github.io/support/version.txt")
+            req = urllib.request.Request("https://liquid-wq.github.io/support/version_python.txt")
             with urllib.request.urlopen(req, timeout=8) as r:
                 remote = int(r.read().decode("utf-8").strip())
             if remote > CURRENT_BUILD:
