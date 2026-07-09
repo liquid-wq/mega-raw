@@ -174,8 +174,8 @@ _TR.update({
 })
 
 
-VERSION = "v5.89 (207. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
-CURRENT_BUILD = 207
+VERSION = "v5.90 (208. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
+CURRENT_BUILD = 208
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -1642,8 +1642,6 @@ class App(tk.Tk):
                 lines.append(f"Von der Engine lesbar: {n-uns}/{n}")
                 if uns: lines.append(f"Nicht auswertbar (Pointer/Sonderkonstrukt): {uns}")
                 if pal: lines.append(f"Region-abhaengig (60Hz noetig): {pal}")
-                lines.append("ROM-Datei nicht im Gedaechtnis — fuer Stub-/Boot-Pruefung")
-                lines.append("einmal manuell 'ROM WAEHLEN ZUM PATCHEN' auf diese ROM.")
             head = "KOMPATIBEL" if ok else "NICHT KOMPATIBEL"
             col = self.C["green"] if ok else self.C["red"]
             self.after(0,self.compat_var.set, f"[{head}]\n" + "\n".join(lines))
