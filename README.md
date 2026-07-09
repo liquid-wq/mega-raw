@@ -26,6 +26,17 @@ Kein offizielles RetroAchievements-Produkt.
 
 ---
 
+## Probleme melden
+
+Dies ist ein Hobby-Projekt — bei tausenden Mega-Drive-Spielen ist es kaum
+machbar, alle einzeln zu testen. Wenn ein Spiel nicht startet, ein Achievement
+falsch triggert, oder sonst etwas nicht funktioniert: bitte über den
+[Issues-Tab](../../issues) melden, am besten mit Spielname, ROM-Region und
+kurzer Beschreibung was passiert ist. Jede Meldung hilft, die Abdeckung
+schrittweise zu verbessern.
+
+---
+
 **English:**
 
 This project comes in two versions:
@@ -49,3 +60,14 @@ the Python version stays available in parallel for transparency.
 
 © 2026 Liqui. Private, non-commercial hobby project.
 Not an official RetroAchievements product.
+
+---
+
+## Reporting issues
+
+This is a hobby project — with thousands of Mega Drive games out there, it's
+practically impossible to test every single one. If a game doesn't boot, an
+achievement triggers incorrectly, or anything else is off: please report it
+via the [Issues tab](../../issues), ideally with the game name, ROM region,
+and a short description of what happened. Every report helps improve
+coverage step by step.
