@@ -174,8 +174,8 @@ _TR.update({
 })
 
 
-VERSION = "v5.86 (204. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
-CURRENT_BUILD = 204
+VERSION = "v5.89 (207. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
+CURRENT_BUILD = 207
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -205,6 +205,7 @@ HOOK_DB = {
     "1bc674be034e43c96b86487ac69d9293": {"stub":0x068156, "name":"Sonic The Hedgehog"},
     "04d2c7da9aac3fbeadf6bb8ccd27b560": {"stub":0x329AA, "name":"Golden Axe"},
     "5a8f7c6437d239690b4a15287d841c26": {"stub":0x0FBF20, "name":"Shinobi III"},
+    "9f54481697efc9e6b96fcd054883ae70": {"stub":0x1FFB80, "name":"Aaahh!!! Real Monsters (USA)"},
 }
 
 # ROM-Serial → RA Game-ID. Für Auto-Erkennung ohne lokale ROM-Datei.
@@ -646,14 +647,10 @@ def find_stub_addr(data, needed):
     # dort BRAM ein — Lehre aus Dynamite Headdy). Lineare ROMs duerfen bis 4MB
     # anhaengen (Lehre aus Gargoyles 3MB: kein Banking, voller linearer Raum).
     ceiling = 0x200000 if banking else 0x400000
-    # 1) Standard: hinter dem Dateiende anhaengen (ausserhalb jeder Checksum) —
-    # ausser die ROM ist bereits exakt eine Zweierpotenz (EverDrive laedt dann
-    # nur diese Groesse, ein Stub dahinter waere unsichtbar -> Black Screen).
-    is_pow2 = len(data) > 0 and (len(data) & (len(data)-1)) == 0
-    if not is_pow2:
-        addr = (len(data) + 0xF) & ~0xF
-        if addr + needed <= ceiling:
-            return addr, True
+    # 1) Standard: hinter dem Dateiende anhaengen (ausserhalb jeder Checksum)
+    addr = (len(data) + 0xF) & ~0xF
+    if addr + needed <= ceiling:
+        return addr, True
     # 2) Padding am Dateiende (Checksum-Patch noetig)
     j = len(data)
     while j > 0 and data[j-1] in (0x00, 0xFF):
@@ -1296,6 +1293,14 @@ class App(tk.Tk):
                   bd=0, command=open_cat_thing).pack(pady=(6,12))
 
     def _build(self):
+        # Pixelart (Jason) ueber dem Titel
+        try:
+            jason_path = _asset("jason_pixel_small.png")
+            if os.path.isfile(jason_path):
+                self._jason_img = tk.PhotoImage(file=jason_path)
+                tk.Label(self, image=self._jason_img, bg=self.C["bg"]).pack(pady=(8,0))
+        except Exception:
+            pass
         tk.Label(self, text="MEGA-RAW",
                  font=("Courier",13,"bold"), fg=self.C["gold"], bg=self.C["bg"]).pack(pady=(10,0))
         tk.Label(self, text=f"— {version_str()} —",
@@ -1414,25 +1419,38 @@ class App(tk.Tk):
                  bg=self.C["panel"],anchor="w",justify="left")
         self.bram_lbl.pack(fill="x")
         # Farbige Hex-Anzeige mit Diff-Highlighting: geaenderte Bytes leuchten
-        # golden auf, unveraenderte bleiben gruen — macht die Live-RAM-Auslese
-        # auf einen Blick erkennbar.
+        # 1s lang rot auf und verblassen dann ueber 1s zu gruen.
         self.bram_hex = tk.Text(p, height=1, font=("Courier",10), bg=self.C["panel"],
                  bd=0, highlightthickness=0, wrap="none", state="disabled")
         self.bram_hex.pack(fill="x")
-        self.bram_hex.tag_configure("changed", foreground=self.C["gold"])
         self.bram_hex.tag_configure("same", foreground=self.C["green"])
         self._last_bram_bytes = None
+        self._bram_change_ts = {}
+
+    def _fade_color(self, age_ms):
+        """0-1000ms: voll rot. 1000-2000ms: Verlauf rot -> gruen."""
+        t = 0.0 if age_ms < 1000 else min(1.0, (age_ms - 1000) / 1000.0)
+        r = int(0xc0 + t * (0x3d - 0xc0))
+        g = int(0x39 + t * (0xd6 - 0x39))
+        b = int(0x2b + t * (0x8c - 0x2b))
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def _update_bram_hex(self, byte_values):
         """byte_values: Liste von Ints (0-255), die aktuell angezeigten BRAM-Bytes."""
+        now = time.time() * 1000
+        last = self._last_bram_bytes
         self.bram_hex.config(state="normal")
         self.bram_hex.delete("1.0", "end")
-        last = self._last_bram_bytes
         for i, v in enumerate(byte_values):
-            tag = "same"
             if last is not None and (i >= len(last) or last[i] != v):
-                tag = "changed"
-            self.bram_hex.insert("end", f"{v:02X} ", tag)
+                self._bram_change_ts[i] = now
+            age = now - self._bram_change_ts.get(i, -9999)
+            if 0 <= age < 2000:
+                tag = f"fade{i}"
+                self.bram_hex.tag_configure(tag, foreground=self._fade_color(age))
+                self.bram_hex.insert("end", f"{v:02X} ", tag)
+            else:
+                self.bram_hex.insert("end", f"{v:02X} ", "same")
         self.bram_hex.config(state="disabled")
         self._last_bram_bytes = list(byte_values)
 
