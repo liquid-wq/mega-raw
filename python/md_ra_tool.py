@@ -43,7 +43,7 @@ LANG = "de"   # wird beim Start aus settings.json gesetzt
 # (failsafe: nie ein leerer Button).
 _TR = {
     # Buttons / Panels
-    "DURCHSUCHEN": "BROWSE",
+    "ROM WAEHLEN ZUM PATCHEN": "CHOOSE ROM TO PATCH",
     "ORDNER PATCHEN": "PATCH FOLDER",
     "SD-EXPORT": "SD EXPORT",
     "IPS PATCH ERSTELLEN": "CREATE IPS PATCH",
@@ -102,7 +102,7 @@ _TR = {
     "Nicht eingeloggt": "Not logged in",
     "Keine ROM": "No ROM",
     "LOGIN": "LOG IN",
-    "Zuerst ein ROM laden (DURCHSUCHEN).": "Load a ROM first (BROWSE).",
+    "Zuerst ein ROM laden (ROM WAEHLEN ZUM PATCHEN).": "Load a ROM first (CHOOSE ROM TO PATCH).",
     "Bitte zuerst einloggen, dann ROM laden.": "Please log in first, then load a ROM.",
     "Spiel erkannt, aber nicht eingeloggt": "Game detected, but not logged in",
     "auto-erkannt — Achievements laufen automatisch (Zusatz-Infos erscheinen, sobald das Spiel einmal gepatcht wurde)":
@@ -174,8 +174,8 @@ _TR.update({
 })
 
 
-VERSION = "v5.84 (202. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
-CURRENT_BUILD = 202
+VERSION = "v5.86 (204. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
+CURRENT_BUILD = 204
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -1104,7 +1104,7 @@ class App(tk.Tk):
 
     def _check_update_worker(self):
         try:
-            req = urllib.request.Request("https://liquid-wq.github.io/support/version.txt")
+            req = urllib.request.Request("https://liquid-wq.github.io/support/version_python.txt")
             with urllib.request.urlopen(req, timeout=8) as r:
                 remote = int(r.read().decode("utf-8").strip())
             if remote > CURRENT_BUILD:
@@ -1344,7 +1344,7 @@ class App(tk.Tk):
         r = tk.Frame(p, bg=self.C["panel"]); r.pack(fill="x", pady=3)
         self.rom_lbl = tk.Label(r,text=T("Keine ROM"),font=("Courier",9),fg=self.C["fg"],bg=self.C["panel"],anchor="w")
         self.rom_lbl.pack(side="left",fill="x",expand=True)
-        b_durch = tk.Button(r,text=T("DURCHSUCHEN"),font=("Courier",8),fg=self.C["gold"],bg=self.C["bg"],
+        b_durch = tk.Button(r,text=T("ROM WAEHLEN ZUM PATCHEN"),font=("Courier",8),fg=self.C["gold"],bg=self.C["bg"],
                   relief="flat",cursor="hand2",command=self._choose); b_durch.pack(side="right")
         b_batch = tk.Button(r,text=T("ORDNER PATCHEN"),font=("Courier",8),fg=self.C["cyan"],bg=self.C["bg"],
                   relief="flat",cursor="hand2",command=self._batch_patch); b_batch.pack(side="right",padx=(0,8))
@@ -1413,6 +1413,28 @@ class App(tk.Tk):
         self.bram_lbl = tk.Label(p,textvariable=self.bram_var,font=("Courier",8),fg=self.C["cyan"],
                  bg=self.C["panel"],anchor="w",justify="left")
         self.bram_lbl.pack(fill="x")
+        # Farbige Hex-Anzeige mit Diff-Highlighting: geaenderte Bytes leuchten
+        # golden auf, unveraenderte bleiben gruen — macht die Live-RAM-Auslese
+        # auf einen Blick erkennbar.
+        self.bram_hex = tk.Text(p, height=1, font=("Courier",10), bg=self.C["panel"],
+                 bd=0, highlightthickness=0, wrap="none", state="disabled")
+        self.bram_hex.pack(fill="x")
+        self.bram_hex.tag_configure("changed", foreground=self.C["gold"])
+        self.bram_hex.tag_configure("same", foreground=self.C["green"])
+        self._last_bram_bytes = None
+
+    def _update_bram_hex(self, byte_values):
+        """byte_values: Liste von Ints (0-255), die aktuell angezeigten BRAM-Bytes."""
+        self.bram_hex.config(state="normal")
+        self.bram_hex.delete("1.0", "end")
+        last = self._last_bram_bytes
+        for i, v in enumerate(byte_values):
+            tag = "same"
+            if last is not None and (i >= len(last) or last[i] != v):
+                tag = "changed"
+            self.bram_hex.insert("end", f"{v:02X} ", tag)
+        self.bram_hex.config(state="disabled")
+        self._last_bram_bytes = list(byte_values)
 
     def _ac_ui(self, p):
         # Scrollbare Liste: Canvas + inneres Frame
@@ -1603,7 +1625,7 @@ class App(tk.Tk):
                 if uns: lines.append(f"Nicht auswertbar (Pointer/Sonderkonstrukt): {uns}")
                 if pal: lines.append(f"Region-abhaengig (60Hz noetig): {pal}")
                 lines.append("ROM-Datei nicht im Gedaechtnis — fuer Stub-/Boot-Pruefung")
-                lines.append("einmal manuell 'DURCHSUCHEN' auf diese ROM.")
+                lines.append("einmal manuell 'ROM WAEHLEN ZUM PATCHEN' auf diese ROM.")
             head = "KOMPATIBEL" if ok else "NICHT KOMPATIBEL"
             col = self.C["green"] if ok else self.C["red"]
             self.after(0,self.compat_var.set, f"[{head}]\n" + "\n".join(lines))
@@ -1717,7 +1739,7 @@ class App(tk.Tk):
 
     def _patch(self):
         if not self.rom_path or not self.game:
-            messagebox.showwarning(T("Hinweis"),T("Zuerst ein ROM laden (DURCHSUCHEN)."))
+            messagebox.showwarning(T("Hinweis"),T("Zuerst ein ROM laden (ROM WAEHLEN ZUM PATCHEN)."))
             return
         if not self.game.get("addr_list"):
             if self.game.get("no_set"):
@@ -2383,8 +2405,9 @@ class App(tk.Tk):
         while self.monitoring:
             try:
                 data = read_bram()
-                dump = " ".join(f"{data[i]:02X}" for i in range(1,min(24,len(data)),2))
-                self.after(0,self.bram_var.set,f"[{getattr(self,'_mode','?')}]  [{dump}]")
+                bram_bytes = [data[i] for i in range(1,min(24,len(data)),2)]
+                self.after(0,self.bram_var.set,f"[{getattr(self,'_mode','?')}]")
+                self.after(0,self._update_bram_hex,bram_bytes)
 
                 # Spiel-Auto-Erkennung: Stub (ab Gen 0x48) schreibt die RA-Game-ID
                 # nach BRAM 203/205 — Tool laedt das Spiel ohne manuelle Auswahl.
