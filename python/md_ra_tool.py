@@ -74,8 +74,8 @@ _TR = {
     "Quell-Archiv (RAR/ZIP) nach Entpacken loeschen":
         "Delete source archive (RAR/ZIP) after extraction",
     "Granularitaet:": "Granularity:",
-    "Schnellstart:  1. Einloggen   2. Spiel einmalig patchen   3. Spiel starten   4. Monitor starten":
-        "Quick start:  1. Log in   2. Patch the game once   3. Start the game   4. Start monitor",
+    "Schnellstart:  1. Einloggen   2. Stub-Datenbank aktualisieren   3. Spiel einmalig patchen   4. Spiel starten   5. Monitor starten":
+        "Quick start:  1. Log in   2. Update stub database   3. Patch the game once   4. Start the game   5. Start monitor",
     "Verbinde...": "Connecting...",
     "Support\n\naber falls du darueber nachdenkst,\nlies bitte 'about the cat'": "Support\n\nbut if you're thinking about it,\nplease read 'about the cat'",
     # Statuszeilen / Meldungen (haeufig)
@@ -174,8 +174,8 @@ _TR.update({
 })
 
 
-VERSION = "v5.90 (208. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
-CURRENT_BUILD = 208
+VERSION = "v5.91 (209. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
+CURRENT_BUILD = 209
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -207,6 +207,64 @@ HOOK_DB = {
     "5a8f7c6437d239690b4a15287d841c26": {"stub":0x0FBF20, "name":"Shinobi III"},
     "9f54481697efc9e6b96fcd054883ae70": {"stub":0x1FFB80, "name":"Aaahh!!! Real Monsters (USA)"},
 }
+
+# --- Remote Hook-Updates (per Knopfdruck, GitHub Pages) ---
+# Erlaubt es, nach einem Release verifizierte Hash-Hooks nachzuliefern, ohne dass
+# Nutzer ein neues Programm-Release brauchen. HOOK_DB bleibt IMMER unveraendert als
+# Fallback bestehen - diese Funktionen aendern nichts an bestehendem Verhalten,
+# solange sie nicht aktiv (Knopfdruck) aufgerufen werden. Quelle:
+# https://liquid-wq.github.io/data/hook_datenbank.json
+REMOTE_HOOKS = {}  # leer bis explizit geladen, gleiche Struktur wie HOOK_DB
+
+def find_hook(md5):
+    """Sucht zuerst in REMOTE_HOOKS, dann in HOOK_DB. None wenn nichts gefunden."""
+    if md5 in REMOTE_HOOKS:
+        return REMOTE_HOOKS[md5]
+    return HOOK_DB.get(md5)
+
+def load_remote_hooks_from_json(json_text):
+    """Parsed JSON-Text und ersetzt REMOTE_HOOKS. Rueckgabe: Anzahl geladener
+    Eintraege, oder -1 bei Parse-Fehler (REMOTE_HOOKS bleibt dann unveraendert)."""
+    global REMOTE_HOOKS
+    try:
+        data = json.loads(json_text)
+        hooks = data.get("hooks", [])
+        parsed = {}
+        for entry in hooks:
+            md5 = entry.get("md5", "")
+            addr_str = entry.get("addr", "")
+            name = entry.get("name", md5)
+            if not md5 or not addr_str:
+                return -1
+            addr = int(addr_str, 16)
+            parsed[md5] = {"stub": addr, "name": name}
+        REMOTE_HOOKS = parsed
+        return len(REMOTE_HOOKS)
+    except Exception:
+        return -1
+
+def save_remote_hooks_cache(cache_path, json_text):
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            f.write(json_text)
+        return True
+    except Exception:
+        return False
+
+def load_remote_hooks_cache(cache_path):
+    """Laedt zuvor gecachten JSON-Text von Platte (falls vorhanden) - ohne Netzwerk.
+    Rueckgabe: Anzahl geladener Eintraege, 0 wenn keine Cache-Datei existiert, -1 bei Fehler."""
+    if not os.path.isfile(cache_path):
+        return 0
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        return load_remote_hooks_from_json(text)
+    except Exception:
+        return -1
+
+def remote_hook_names():
+    return [v["name"] for v in REMOTE_HOOKS.values()]
 
 # ROM-Serial → RA Game-ID. Für Auto-Erkennung ohne lokale ROM-Datei.
 # Serial kommt direkt vom ROM (FCI-Bus 0x180). RA-ID einmalig nachschlagen + cachen.
@@ -516,8 +574,8 @@ def patch_rom_file(rom_path, game):
     orig_vblank = struct.unpack_from(">I", orig, 0x78)[0]
     needed = 60 + 10 * sum(n for _, n in game["addr_list"]) + 100
     rom_end = rom_end_from_header(orig)
-    if h in HOOK_DB and HOOK_DB[h].get("stub"):
-        stub_addr, outside = HOOK_DB[h]["stub"], False
+    if find_hook(h):
+        stub_addr, outside = find_hook(h)["stub"], False
     else:
         stub_addr, outside = find_stub_addr(orig, needed)
     if not stub_addr:
@@ -1086,6 +1144,9 @@ class App(tk.Tk):
         self.ra_token = None
         self.user = tk.StringVar()
         self.pw = tk.StringVar()
+        # Stub-Datenbank: zuletzt bekannten Stand von Platte laden (kein Netzwerk).
+        # Wirkt sich nur aus, wenn vorher schon einmal "aktualisieren" geklickt wurde.
+        load_remote_hooks_cache(_p("hooks_cache.json"))
         # --- Einstellungen (persistent in settings.json) ---
         self.settings = {"hardcore": False, "av_safe": False, "tv_flash": True,
                          "bucket": "A-E", "language": "de"}
@@ -1106,7 +1167,7 @@ class App(tk.Tk):
 
     def _check_update_worker(self):
         try:
-            req = urllib.request.Request("https://liquid-wq.github.io/support/version_python.txt")
+            req = urllib.request.Request("https://liquid-wq.github.io/data/version_python.txt")
             with urllib.request.urlopen(req, timeout=8) as r:
                 remote = int(r.read().decode("utf-8").strip())
             if remote > CURRENT_BUILD:
@@ -1200,7 +1261,7 @@ class App(tk.Tk):
         # Support-Link
         def open_support():
             import webbrowser
-            try: webbrowser.open("https://liquid-wq.github.io/support/")
+            try: webbrowser.open("https://liquid-wq.github.io/data/")
             except Exception: pass
         support_lbl = tk.Label(win, text=T("Support\n\naber falls du darueber nachdenkst,\nlies bitte 'about the cat'"),
                   font=("Courier",9), fg=self.C["gray"], bg=self.C["bg"],
@@ -1319,7 +1380,7 @@ class App(tk.Tk):
         # wraplength wird unten dynamisch an die Fensterbreite gekoppelt, damit
         # die Zeile auf schmalen/hochskalierten Bildschirmen (z.B. Surface)
         # umbricht statt abgeschnitten zu werden.
-        self._quickstart = tk.Label(self, text=T("Schnellstart:  1. Einloggen   2. Spiel einmalig patchen   3. Spiel starten   4. Monitor starten"),
+        self._quickstart = tk.Label(self, text=T("Schnellstart:  1. Einloggen   2. Stub-Datenbank aktualisieren   3. Spiel einmalig patchen   4. Spiel starten   5. Monitor starten"),
                  font=("Courier",8), fg=self.C["green"], bg=self.C["bg"],
                  justify="center", wraplength=700)
         self._quickstart.pack(pady=(0,6), fill="x")
@@ -1349,6 +1410,16 @@ class App(tk.Tk):
                   relief="flat",cursor="hand2",command=self._login).pack(side="right")
         self.login_lbl = tk.Label(p,text=T("Nicht eingeloggt"),font=("Courier",8),fg=self.C["gray"],bg=self.C["panel"])
         self.login_lbl.pack(anchor="w")
+        # --- Stub-Datenbank (Remote-Hooks) ---
+        # Laedt/aktualisiert nach dem Release verifizierte Stub-Adressen fuer
+        # einzelne Problemspiele. Rein additiv: aendert nichts, solange nicht
+        # geklickt. Fallback bleibt immer die eingebaute HOOK_DB.
+        hookdb_btn = tk.Button(p,text=T("STUB-DATENBANK AKTUALISIEREN"),font=("Courier",8),
+                               fg=self.C["cyan"],bg=self.C["panel"],relief="flat",cursor="hand2",
+                               command=self._update_hooks)
+        hookdb_btn.pack(anchor="w", pady=(2,0))
+        self.hookdb_lbl = tk.Label(p,text="",font=("Courier",7),fg=self.C["gray"],bg=self.C["panel"])
+        self.hookdb_lbl.pack(anchor="w")
 
     def _rom_ui(self, p):
         r = tk.Frame(p, bg=self.C["panel"]); r.pack(fill="x", pady=3)
@@ -1475,6 +1546,37 @@ class App(tk.Tk):
         self.ac_labels = {}
 
     # ---- Actions ----
+    def _update_hooks(self):
+        self.hookdb_lbl.config(text=T("Aktualisiere..."),fg=self.C["gray"])
+        threading.Thread(target=self._update_hooks_t,daemon=True).start()
+
+    def _update_hooks_t(self):
+        cache_path = _p("hooks_cache.json")
+        try:
+            req = urllib.request.Request(
+                "https://liquid-wq.github.io/data/hook_datenbank.json",
+                headers={"User-Agent": "MegaDriveRA/HooksUpdate"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                text = resp.read().decode("utf-8")
+        except Exception:
+            self.after(0,self.hookdb_lbl.config,
+                {"text":T("Kein Internet / Server nicht erreichbar. Bisheriger Stand bleibt aktiv."),
+                 "fg":self.C["red"]})
+            return
+        n = load_remote_hooks_from_json(text)
+        if n < 0:
+            self.after(0,self.hookdb_lbl.config,
+                {"text":T("Ungueltige Antwort vom Server. Bisheriger Stand bleibt aktiv."),
+                 "fg":self.C["red"]})
+            return
+        save_remote_hooks_cache(cache_path, text)
+        if n == 0:
+            msg = T("Aktualisiert: keine neuen Fixes.")
+        else:
+            names = ", ".join(remote_hook_names())
+            msg = T(f"Aktualisiert: {n} verifizierte Fixes ({names})")
+        self.after(0,self.hookdb_lbl.config,{"text":msg,"fg":self.C["green"]})
+
     def _login(self):
         u,pw = self.user.get().strip(), self.pw.get().strip()
         if not u or not pw: return
@@ -1788,8 +1890,8 @@ class App(tk.Tk):
                                     self.game.get("gameid", 0))
             needed = max(needed, len(probe) + 32)   # Light-Stub ist groesser
         rom_end = rom_end_from_header(orig)
-        if h in HOOK_DB and HOOK_DB[h].get("stub"):
-            stub_addr, outside = HOOK_DB[h]["stub"], False
+        if find_hook(h):
+            stub_addr, outside = find_hook(h)["stub"], False
         else:
             stub_addr, outside = find_stub_addr(orig, needed)
         if not stub_addr:
