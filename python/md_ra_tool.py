@@ -174,8 +174,8 @@ _TR.update({
 })
 
 
-VERSION = "v5.89 (207. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
-CURRENT_BUILD = 207
+VERSION = "v5.90 (208. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
+CURRENT_BUILD = 208
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -648,9 +648,14 @@ def find_stub_addr(data, needed):
     # anhaengen (Lehre aus Gargoyles 3MB: kein Banking, voller linearer Raum).
     ceiling = 0x200000 if banking else 0x400000
     # 1) Standard: hinter dem Dateiende anhaengen (ausserhalb jeder Checksum)
-    addr = (len(data) + 0xF) & ~0xF
-    if addr + needed <= ceiling:
-        return addr, True
+    # Ausnahme: exakt 2MB-ROMs — Stub bei 0x200000 fuehrt auf EverDrive/Hardware
+    # reproduzierbar zu Crash (PC verdoppelt bei 0x400000, LINE-1111-Trap).
+    # Direkt zu Schritt 3 (interne Luecke).
+    is_2mb = (len(data) == 0x200000)
+    if not is_2mb:
+        addr = (len(data) + 0xF) & ~0xF
+        if addr + needed <= ceiling:
+            return addr, True
     # 2) Padding am Dateiende (Checksum-Patch noetig)
     j = len(data)
     while j > 0 and data[j-1] in (0x00, 0xFF):
@@ -1642,8 +1647,6 @@ class App(tk.Tk):
                 lines.append(f"Von der Engine lesbar: {n-uns}/{n}")
                 if uns: lines.append(f"Nicht auswertbar (Pointer/Sonderkonstrukt): {uns}")
                 if pal: lines.append(f"Region-abhaengig (60Hz noetig): {pal}")
-                lines.append("ROM-Datei nicht im Gedaechtnis — fuer Stub-/Boot-Pruefung")
-                lines.append("einmal manuell 'ROM WAEHLEN ZUM PATCHEN' auf diese ROM.")
             head = "KOMPATIBEL" if ok else "NICHT KOMPATIBEL"
             col = self.C["green"] if ok else self.C["red"]
             self.after(0,self.compat_var.set, f"[{head}]\n" + "\n".join(lines))
