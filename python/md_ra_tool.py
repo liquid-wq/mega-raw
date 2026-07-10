@@ -648,9 +648,14 @@ def find_stub_addr(data, needed):
     # anhaengen (Lehre aus Gargoyles 3MB: kein Banking, voller linearer Raum).
     ceiling = 0x200000 if banking else 0x400000
     # 1) Standard: hinter dem Dateiende anhaengen (ausserhalb jeder Checksum)
-    addr = (len(data) + 0xF) & ~0xF
-    if addr + needed <= ceiling:
-        return addr, True
+    # Ausnahme: exakt 2MB-ROMs — Stub bei 0x200000 fuehrt auf EverDrive/Hardware
+    # reproduzierbar zu Crash (PC verdoppelt bei 0x400000, LINE-1111-Trap).
+    # Direkt zu Schritt 3 (interne Luecke).
+    is_2mb = (len(data) == 0x200000)
+    if not is_2mb:
+        addr = (len(data) + 0xF) & ~0xF
+        if addr + needed <= ceiling:
+            return addr, True
     # 2) Padding am Dateiende (Checksum-Patch noetig)
     j = len(data)
     while j > 0 and data[j-1] in (0x00, 0xFF):
