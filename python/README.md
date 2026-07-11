@@ -34,13 +34,17 @@ Konsole, kein Emulator.
 - Automatische Spielerkennung, Boot-Risiko-Analyse, Verifikations-Reports
 - Deutsch und Englisch (in den Optionen umschaltbar)
 
-## Abdeckung (gemessen, nicht geschaetzt)
+## Abdeckung
 
 - Engine wertet 89 % der Mega-Drive-Sets vollstaendig aus, 11 % teilweise, 0 % gar nicht
-- Von erkannten Spielen mit Set: ~98 % patchbar
+- Theoretisch ist eine Patch-Abdeckung von 90 %+ moeglich — in der Praxis haengt
+  das davon ab, wie vollstaendig die Stub-Datenbank bekannte Problemfaelle abdeckt
+  (Spiele, bei denen die automatische Stub-Platzierung fehlschlaegt). Diese
+  Datenbank waechst laufend durch Tests und kann per Knopfdruck aktualisiert werden.
 - Nicht kompatibel: 4-MB-Maximalspiele (~1 %, z. B. Mortal Kombat 3) — technische
   Grenze des Mega-Drive-Adressraums
-- Verbleibende Teil-Luecken betreffen fast nur Pointer-Konstrukte
+- Verbleibende Luecken betreffen ueberwiegend Pointer-Konstrukte und noch nicht
+  erfasste Einzelfaelle
 
 ---
 
@@ -259,13 +263,16 @@ achievements on your RA account — all on the real console, no emulator.
 - Automatic game detection, boot-risk analysis, verification reports
 - German and English (switchable in the options)
 
-## Coverage (measured, not estimated)
+## Coverage
 
 - The engine fully evaluates 89% of Mega Drive sets, 11% partially, 0% not at all
-- Of detected games with a set: ~98% patchable
+- A patch coverage of 90%+ is theoretically possible — in practice this depends
+  on how completely the stub database covers known problem cases (games where
+  automatic stub placement fails). This database grows continuously through
+  testing and can be updated with a single click.
 - Not compatible: 4 MB maximum-size games (~1%, e.g. Mortal Kombat 3) — a
   technical limit of the Mega Drive address space
-- Remaining partial gaps almost only concern pointer constructs
+- Remaining gaps mostly concern pointer constructs and not-yet-covered edge cases
 
 ---
 
