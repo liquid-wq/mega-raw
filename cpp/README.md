@@ -149,6 +149,13 @@ Manche Sets verlangen 60 Hz (NTSC). Auf einer 50-Hz-PAL-Konsole sind diese
 Achievements gesperrt (eine RA-Regel, nicht durch das Tool). Das Tool erkennt
 den Hz-Status der laufenden Konsole und markiert betroffene Achievements.
 
+**Bekannte Einschraenkung:** Bisherige Tests liefen ueberwiegend auf
+PAL-Hardware. Da NTSC (60 Hz) ein kuerzeres VBlank-Zeitfenster als PAL (50 Hz)
+hat, in dem der Stub arbeitet, ist es moeglich, dass bei Spielen mit vielen
+Achievements auf NTSC-Konsolen frueher Grafikfehler auftreten als bisher
+beobachtet. Tritt das auf: **Light-Stub** aktivieren (siehe Problemloesung
+oben). Rueckmeldungen zu NTSC-Erfahrungen sind besonders willkommen.
+
 ---
 
 ## Fairness & Cheat-Schutz
@@ -320,6 +327,13 @@ not listed there.
 Some sets require 60 Hz (NTSC). On a 50 Hz PAL console these achievements are
 locked (an RA rule, not by the tool). The tool detects the Hz status of the
 running console and marks affected achievements.
+
+**Known limitation:** Testing so far has mostly happened on PAL hardware.
+Since NTSC (60 Hz) has a shorter VBlank window than PAL (50 Hz) — the time
+slot the stub runs in — games with many achievements may hit graphics
+glitches sooner on NTSC consoles than observed so far. If that happens,
+enable the **Light stub** (see Troubleshooting above). Feedback on NTSC
+experiences is especially welcome.
 
 ---
 
