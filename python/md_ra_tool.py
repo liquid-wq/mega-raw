@@ -77,6 +77,19 @@ _TR = {
     "Schnellstart:  1. Einloggen   2. Stub-Datenbank aktualisieren   3. Spiel einmalig patchen   4. Spiel starten   5. Monitor starten":
         "Quick start:  1. Log in   2. Update stub database   3. Patch the game once   4. Start the game   5. Start monitor",
     "Verbinde...": "Connecting...",
+    "STUB-DATENBANK AKTUALISIEREN": "UPDATE STUB DATABASE",
+    "Aktualisiere...": "Updating...",
+    "Kein Internet / Server nicht erreichbar. Bisheriger Stand bleibt aktiv.":
+        "No internet / server unreachable. Previous state remains active.",
+    "Ungueltige Antwort vom Server. Bisheriger Stand bleibt aktiv.":
+        "Invalid response from server. Previous state remains active.",
+    "Aktualisiert: keine neuen Fixes.": "Updated: no new fixes.",
+    "Laedt nach dem Release verifizierte Korrekturen fuer einzelne Spiele nach (z.B. bessere "
+    "Stub-Platzierung), ohne dass ein neues Programm-Update noetig ist. Funktioniert nur mit "
+    "Internetverbindung.":
+        "Downloads verified fixes for individual games released after the program update "
+        "(e.g. better stub placement), without needing a new program update. Requires an "
+        "internet connection.",
     "Support\n\naber falls du darueber nachdenkst,\nlies bitte 'about the cat'": "Support\n\nbut if you're thinking about it,\nplease read 'about the cat'",
     # Statuszeilen / Meldungen (haeufig)
     "Bitte zuerst einloggen.": "Please log in first.",
@@ -174,8 +187,8 @@ _TR.update({
 })
 
 
-VERSION = "v5.91 (209. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
-CURRENT_BUILD = 209
+VERSION = "v5.92 (210. Version)"  # Ko-fi-Link/Text durch eigene Support-Seite ersetzt
+CURRENT_BUILD = 210
 VERSION_SUFFIX_DE = " und immer noch nicht perfekt"
 VERSION_SUFFIX_EN = " and still not perfect"
 def version_str():
@@ -1418,6 +1431,9 @@ class App(tk.Tk):
                                fg=self.C["cyan"],bg=self.C["panel"],relief="flat",cursor="hand2",
                                command=self._update_hooks)
         hookdb_btn.pack(anchor="w", pady=(2,0))
+        add_tip(hookdb_btn, "Laedt nach dem Release verifizierte Korrekturen fuer einzelne "
+                             "Spiele nach (z.B. bessere Stub-Platzierung), ohne dass ein neues "
+                             "Programm-Update noetig ist. Funktioniert nur mit Internetverbindung.")
         self.hookdb_lbl = tk.Label(p,text="",font=("Courier",7),fg=self.C["gray"],bg=self.C["panel"])
         self.hookdb_lbl.pack(anchor="w")
 
@@ -1574,7 +1590,8 @@ class App(tk.Tk):
             msg = T("Aktualisiert: keine neuen Fixes.")
         else:
             names = ", ".join(remote_hook_names())
-            msg = T(f"Aktualisiert: {n} verifizierte Fixes ({names})")
+            msg = (f"Updated: {n} verified fixes ({names})") if LANG == "en" else \
+                  (f"Aktualisiert: {n} verifizierte Fixes ({names})")
         self.after(0,self.hookdb_lbl.config,{"text":msg,"fg":self.C["green"]})
 
     def _login(self):
