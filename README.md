@@ -9,6 +9,12 @@ Dieses Projekt gibt es in zwei Versionen:
 Fertige `.exe` für Windows, kein Python nötig. Einfach entpacken und starten.
 → [C++-README lesen](cpp/README.md)
 
+**Zum Spielen brauchst du nur den Ordner `cpp/Release/`** — lade dir nur
+diesen herunter, dort liegt die fertige `.exe`. Der Ordner `cpp/src/` enthält
+den Quellcode zur Transparenz (damit jeder selbst nachvollziehen kann, dass
+keine Schadsoftware enthalten ist — nicht zur freien Weiterverwendung) und
+wird zum Spielen nicht benoetigt.
+
 ## 🐍 [python/](python/)
 
 Die ursprüngliche Referenzversion als lesbare Python-Dateien, kein `.exe`.
@@ -45,6 +51,11 @@ This project comes in two versions:
 
 Ready-to-run `.exe` for Windows, no Python required. Just unpack and run.
 → [Read the C++ README](cpp/README.md)
+
+**To play, you only need the `cpp/Release/` folder** — download just that
+one, the ready-to-run `.exe` is in there. The `cpp/src/` folder contains the
+source code for transparency (so anyone can see for themselves that there's
+no malware inside — not for free reuse) and isn't needed to play.
 
 ## 🐍 [python/](python/)
 
