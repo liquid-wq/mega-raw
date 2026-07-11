@@ -202,6 +202,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     monitorBtn_->setToolTip(T("Startet die Live-Ueberwachung: liest per USB den Spielstand und schaltet Achievements frei. Spiel auf der Konsole starten."));
     tvBtn->setToolTip(T("Testet den goldenen Bildschirm-Blitz, der bei einem freigeschalteten Achievement auf dem Fernseher erscheint."));
     lightStubCheck_->setToolTip(T("Light-Stub: verteilt die RAM-Spiegelung rotierend ueber mehrere Frames -> deutlich weniger VBlank-Last, behebt Flackern bei zeitkritischen Spielen. Kein TV-Goldblitz; Werte aktualisieren rotierend (fuer Achievements irrelevant). Nur aktivieren, wenn ein Spiel mit dem normalen Patch Grafikfehler zeigt."));
+    updateHooksBtn_->setToolTip(T("Laedt nach dem Release verifizierte Korrekturen fuer einzelne Spiele nach (z.B. bessere Stub-Platzierung), ohne dass ein neues Programm-Update noetig ist. Funktioniert nur mit Internetverbindung."));
 
     // Stub-Datenbank: zuletzt bekannten Stand von Platte laden (kein Netzwerk).
     // Wirkt sich nur aus, wenn vorher schon einmal "aktualisieren" geklickt wurde.

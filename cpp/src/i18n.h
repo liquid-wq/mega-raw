@@ -114,6 +114,8 @@ inline QString T(const QString& s) {
          QStringLiteral("Could not load stub database (no internet or server unreachable). Previous state remains active.")},
         {QStringLiteral("Antwort vom Server war ungueltig. Bisheriger Stand bleibt aktiv."),
          QStringLiteral("Response from server was invalid. Previous state remains active.")},
+        {QStringLiteral("Laedt nach dem Release verifizierte Korrekturen fuer einzelne Spiele nach (z.B. bessere Stub-Platzierung), ohne dass ein neues Programm-Update noetig ist. Funktioniert nur mit Internetverbindung."),
+         QStringLiteral("Downloads verified fixes for individual games released after the program update (e.g. better stub placement), without needing a new program update. Requires an internet connection.")},
     };
     return tr.value(s, s);
 }
