@@ -1,0 +1,17 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="app_icon">app_icon.png</file>
+    <file alias="cat/cat00.png">cat_frames/cat00.png</file>
+    <file alias="cat/cat01.png">cat_frames/cat01.png</file>
+    <file alias="cat/cat02.png">cat_frames/cat02.png</file>
+    <file alias="cat/cat03.png">cat_frames/cat03.png</file>
+    <file alias="cat/cat04.png">cat_frames/cat04.png</file>
+    <file alias="cat/cat05.png">cat_frames/cat05.png</file>
+    <file alias="cat/cat06.png">cat_frames/cat06.png</file>
+    <file alias="cat/cat07.png">cat_frames/cat07.png</file>
+    <file alias="cat/cat08.png">cat_frames/cat08.png</file>
+    <file alias="cat/cat09.png">cat_frames/cat09.png</file>
+    <file alias="cat/cat10.png">cat_frames/cat10.png</file>
+    <file alias="cat/cat11.png">cat_frames/cat11.png</file>
+  </qresource>
+</RCC>
