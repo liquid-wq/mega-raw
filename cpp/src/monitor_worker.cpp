@@ -22,6 +22,23 @@ void MonitorWorker::stop() {
     running_ = false;
 }
 
+void MonitorWorker::writeSessionMarker(const Game& g) {
+    // Schreibt eine Marker-Zeile in recording.csv, wenn eine neue Spiel-Session
+    // beginnt (Spielname, RA-Game-ID, Zeitstempel). Rein additiv, damit sich
+    // bei Nutzer-Beschwerden ("Achievement X hat nicht ausgeloest") im
+    // Nachhinein nachvollziehen laesst, welcher Abschnitt der Rohdaten zu
+    // welchem Spiel gehoert - vorher war recording.csv eine einzige,
+    // durchgehende Datei ohne Session-Grenzen.
+    std::string path = QDir(QCoreApplication::applicationDirPath())
+        .filePath("recording.csv").toStdString();
+    std::ofstream rec(path, std::ios::app);
+    if (rec) {
+        rec << "# --- Session-Start " << QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss").toStdString()
+            << " | Spiel: " << g.name
+            << " | RA-Game-ID: " << g.gameid << " ---\n";
+    }
+}
+
 void MonitorWorker::start() {
     running_ = true;
     // Autoerkennung

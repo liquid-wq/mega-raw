@@ -30,6 +30,7 @@ public slots:
         QMutexLocker lk(&gameMtx_);
         game_ = g;
         havePrevRam_ = false; // Reset
+        writeSessionMarker(g); // recording.csv: markiert wo eine neue Spiel-Session beginnt
     }
 
 signals:
@@ -42,6 +43,7 @@ signals:
     void finished();
 
 private:
+    void writeSessionMarker(const Game& g);
     int autoGidTried_ = 0;
     int consolePal_ = -1;  // -1 unbekannt, 0 NTSC, 1 PAL
     long long stubAddr_ = 0;
