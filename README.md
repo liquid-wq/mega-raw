@@ -1,5 +1,11 @@
 # MEGA-RAW
 
+**[ Deutsch ](#deutsch)  |  [ English ](#english)**
+
+---
+
+<a name="deutsch"></a>
+
 **RetroAchievements auf echter Sega Mega Drive / Genesis Hardware — über das Mega EverDrive.**
 
 Dieses Projekt gibt es in zwei Versionen:
@@ -42,6 +48,8 @@ kurzer Beschreibung was passiert ist. Jede Meldung hilft, die Abdeckung
 schrittweise zu verbessern.
 
 ---
+
+<a name="english"></a>
 
 **English:**
 
