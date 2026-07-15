@@ -49,7 +49,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     settings_ = Settings::load(settingsPath_);
     g_lang = settings_.language;
 
-    setWindowTitle(QString("MEGA-RAW  (C++ Build %1)").arg(MEGA_RAW_CPP_BUILD));
+    setWindowTitle(QString("MEGA-RAW v%1  (C++ Build %2)").arg(MEGA_RAW_VERSION).arg(MEGA_RAW_CPP_BUILD));
 
     auto* central = new QWidget(this);
     auto* vbox = new QVBoxLayout(central);
