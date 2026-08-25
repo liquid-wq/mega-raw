@@ -326,6 +326,10 @@ void MainWindow::onLogin() {
     thread->start();
 }
 
+// Ordnername der Sicherung. Liegt in dem Wurzelverzeichnis, das beim
+// Einrichten gewaehlt wurde, damit Sicherung und Karte zusammenbleiben.
+static const char* kBackupDir = "MEGA-RAW_ORIG_BACKUP";
+
 void MainWindow::onSetupMapper() {
     // Die Konsole laedt den Custom-Mapper nur, wenn mega-core.x25 im selben
     // Ordner wie das ROM liegt (fpga/README.md). Bei nach Buchstaben
@@ -338,8 +342,19 @@ void MainWindow::onSetupMapper() {
         if (src.isEmpty()) return;
     }
 
+    // Vor der Auswahl erklaeren, was gemeint ist. Ein Nutzer weiss sonst
+    // nicht, ob das Laufwerk oder ein Unterordner erwartet wird - und bei
+    // falscher Wahl landet der Kern an einer Stelle, von der die Konsole
+    // nicht laedt.
+    QMessageBox::information(this, T("Mapper einrichten"),
+        T("Bitte im naechsten Fenster die SD-Karte auswaehlen - also das "
+          "Laufwerk selbst (z.B. H:\\), das den Ordner MEGA enthaelt, "
+          "keinen Unterordner.\n\n"
+          "Der Kern wird dann in alle Ordner kopiert, in denen Spiele liegen. "
+          "Bereits vorhandene Dateien werden vorher gesichert."));
+
     const QString root = QFileDialog::getExistingDirectory(this,
-        T("SD-Karte oder ROM-Ordner waehlen"), settings_.rom_root);
+        T("SD-Karte waehlen - das Laufwerk selbst (mit dem Ordner MEGA), z.B. H:\\"), settings_.rom_root);
     if (root.isEmpty()) return;
     settings_.rom_root = root;
     settings_.save();
@@ -355,7 +370,21 @@ void MainWindow::onSetupMapper() {
     QStringList dirs; dirs << root;
     while (it.hasNext()) dirs << it.next();
 
+    // Krikzz' Systemordner aussparen. In MEGA\\edapp\\* und MEGA\\syscore\\*
+    // liegen seine eigenen Kerne unter demselben Namen mega-core.x25, und
+    // daneben Dateien mit Endungen aus romExt (.bin) - ohne diese Ausnahme
+    // wurden sie als Spielordner gewertet und die Systemkerne ueberschrieben.
+    // Auf Hardware passiert: alle fuenf Systemkerne waren durch unseren
+    // ersetzt, die EverDrive-Systemanwendungen damit unbrauchbar.
+    auto istSystemordner = [](const QString& pfad) {
+        const QString p = QDir::fromNativeSeparators(pfad).toLower();
+        return p.contains("/mega/edapp/") || p.endsWith("/mega/edapp")
+            || p.contains("/mega/syscore/") || p.endsWith("/mega/syscore")
+            || p.contains("/mega/mappers") || p.contains("/mega/sysdata");
+    };
+
     for (const QString& d : dirs) {
+        if (istSystemordner(d)) continue;
         QDir dir(d);
         if (!dir.entryList(romExt, QDir::Files).isEmpty()) targets.insert(d);
     }
@@ -366,19 +395,127 @@ void MainWindow::onSetupMapper() {
         return;
     }
 
-    int ok = 0, fail = 0;
+    // Vor dem Ueberschreiben sichern. Auf der Karte liegen echte Originale
+    // (Krikzz' Kerne), die sonst ersatzlos verloren waeren. Gesichert wird
+    // nur beim ersten Mal je Ordner - ein zweiter Durchlauf darf die bereits
+    // gesicherte Originaldatei nicht durch unsere eigene ueberschreiben.
+    const QString bakRoot = QDir(root).filePath(kBackupDir);
+    int ok = 0, fail = 0, saved = 0;
     for (const QString& d : targets) {
         const QString dst = QDir(d).filePath("mega-core.x25");
+
+        // Nur sichern, was NICHT schon unser eigener Kern ist. Sonst legt
+        // ein zweiter Durchlauf lauter Sicherungen unserer eigenen Datei an -
+        // eine Wiederherstellung waere dann wirkungslos.
+        if (QFile::exists(dst) && QFileInfo(dst).size() != QFileInfo(src).size()) {
+            const QString rel = QDir(root).relativeFilePath(d);
+            const QString bakDir = (rel == "." || rel.isEmpty())
+                                 ? bakRoot : QDir(bakRoot).filePath(rel);
+            const QString bak = QDir(bakDir).filePath("mega-core.x25");
+            if (!QFile::exists(bak)) {
+                QDir().mkpath(bakDir);
+                if (QFile::copy(dst, bak)) ++saved;
+            }
+        }
+
         QFile::remove(dst);
         if (QFile::copy(src, dst)) ++ok; else ++fail;
     }
 
+    if (saved > 0) {
+        appendLog(QString(T("%1 vorhandene Datei(en) nach %2 gesichert."))
+                  .arg(saved).arg(kBackupDir));
+    }
     appendLog(QString(T("Mapper eingerichtet: %1 Ordner beschrieben, %2 fehlgeschlagen."))
               .arg(ok).arg(fail));
     QMessageBox::information(this, T("Mapper einrichten"),
         QString(T("mega-core.x25 in %1 Ordner kopiert.")).arg(ok)
         + (fail ? QString(T("\n%1 Ordner konnten nicht beschrieben werden.")).arg(fail)
-                : QString()));
+                : QString())
+        + (saved ? QString("\n\n") + T("Vorhandene Originale wurden gesichert und lassen "
+                                        "sich in den Optionen wiederherstellen.")
+                 : QString()));
+}
+
+// Gegenstueck zum Einrichten: holt die gesicherten Originale zurueck.
+// Ohne diesen Weg waere ein Nutzer, der die Karte wieder ohne MEGA-RAW
+// benutzen will, auf ein eigenes Backup angewiesen.
+void MainWindow::onRestoreMappers() {
+    // Unsere eigene Datei zum Vergleich - alles, was genauso gross ist,
+    // stammt von uns und darf entfernt werden, wenn es kein Original gab.
+    const QString srcRef = QDir(QCoreApplication::applicationDirPath())
+                           .filePath("mega-core.x25");
+
+    const QString root = QFileDialog::getExistingDirectory(this,
+        T("SD-Karte waehlen - das Laufwerk selbst (mit dem Ordner MEGA), z.B. H:\\"), settings_.rom_root);
+    if (root.isEmpty()) return;
+
+    const QString bakRoot = QDir(root).filePath(kBackupDir);
+
+    // Gesicherte Originale einsammeln - es muss keine geben. Auf einer
+    // unberuehrten Karte liegt in den Spielordnern nichts, dort ist beim
+    // Einrichten nichts ueberschrieben worden. Zurueckzusetzen ist dann
+    // trotzdem etwas: unsere eigenen Kopien.
+    QStringList gesichert;
+    if (QDir(bakRoot).exists()) {
+        QDirIterator bit(bakRoot, QStringList{"mega-core.x25"}, QDir::Files,
+                         QDirIterator::Subdirectories);
+        while (bit.hasNext()) gesichert << bit.next();
+    }
+
+    // Unsere eigenen Kopien einsammeln: gleiche Groesse wie die Datei neben
+    // der Anwendung, ausserhalb des Sicherungsordners.
+    const qint64 unsereGroesse = QFileInfo::exists(srcRef) ? QFileInfo(srcRef).size() : 0;
+    QStringList eigene;
+    if (unsereGroesse > 0) {
+        QDirIterator uit(root, QStringList{"mega-core.x25"}, QDir::Files,
+                         QDirIterator::Subdirectories);
+        while (uit.hasNext()) {
+            const QString f = uit.next();
+            if (f.startsWith(bakRoot)) continue;
+            if (QFileInfo(f).size() != unsereGroesse) continue;
+            eigene << f;
+        }
+    }
+
+    if (gesichert.isEmpty() && eigene.isEmpty()) {
+        QMessageBox::information(this, T("Original-Mapper wiederherstellen"),
+            QString(T("In %1 gibt es nichts zurueckzusetzen.")).arg(root));
+        return;
+    }
+
+    QString frage;
+    if (!gesichert.isEmpty())
+        frage += QString(T("%1 gesicherte Originaldatei(en) zurueckschreiben.")).arg(gesichert.size()) + "\n";
+    if (!eigene.isEmpty())
+        frage += QString(T("%1 von MEGA-RAW angelegte Datei(en) entfernen.")).arg(eigene.size()) + "\n";
+    frage += "\n" + T("Fortfahren?");
+
+    if (QMessageBox::question(this, T("Original-Mapper wiederherstellen"), frage)
+        != QMessageBox::Yes) return;
+
+    // Erst unsere Kopien entfernen, dann Originale zurueckschreiben - so
+    // ueberschreibt das Zurueckschreiben nicht versehentlich sich selbst.
+    int entfernt = 0;
+    for (const QString& f : eigene) {
+        if (QFile::remove(f)) ++entfernt;
+    }
+
+    int ok = 0, fail = 0;
+    for (const QString& b : gesichert) {
+        const QString rel = QDir(bakRoot).relativeFilePath(b);
+        const QString dst = QDir(root).filePath(rel);
+        QDir().mkpath(QFileInfo(dst).absolutePath());
+        QFile::remove(dst);
+        if (QFile::copy(b, dst)) ++ok; else ++fail;
+    }
+
+    appendLog(QString(T("Zuruecksetzen: %1 Original(e) zurueck, %2 eigene entfernt, %3 fehlgeschlagen."))
+              .arg(ok).arg(entfernt).arg(fail));
+    QMessageBox::information(this, T("Original-Mapper wiederherstellen"),
+        QString(T("%1 Originaldatei(en) zurueckgeschrieben, %2 eigene entfernt."))
+            .arg(ok).arg(entfernt)
+        + (fail ? QString(T("\n%1 fehlgeschlagen.")).arg(fail) : QString()));
 }
 
 void MainWindow::onDetectGame() {
@@ -595,6 +732,15 @@ void MainWindow::onOptions() {
         QDesktopServices::openUrl(QUrl("https://github.com/liquid-wq/mega-raw/issues"));
     });
     v->addWidget(bugBtn);
+
+    auto* restBtn = new QPushButton(T("Original-Mapper wiederherstellen"), &dlg);
+    restBtn->setToolTip(T("Schreibt die beim Einrichten gesicherten Originaldateien "
+                          "auf die SD-Karte zurueck."));
+    connect(restBtn, &QPushButton::clicked, &dlg, [this, &dlg]() {
+        dlg.accept();
+        onRestoreMappers();
+    });
+    v->addWidget(restBtn);
     connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
 
@@ -626,11 +772,19 @@ void MainWindow::onOptions() {
 
     if (dlg.exec() == QDialog::Accepted) {
         settings_.hardcore = hc->isChecked();
-        settings_.language = lEn->isChecked() ? "en" : "de";
+
+        // Den Neustart-Hinweis nur zeigen, wenn die Sprache wirklich
+        // gewechselt wurde. Vorher erschien er bei jedem Speichern, auch
+        // wenn nur der Hardcore-Haken geaendert wurde.
+        const QString neueSprache = lEn->isChecked() ? "en" : "de";
+        const bool gewechselt = (neueSprache != settings_.language);
+        settings_.language = neueSprache;
         g_lang = settings_.language;
-        QMessageBox::information(this, T("Hinweis"),
-            g_lang=="en" ? "Language set. Restart the tool to apply all texts."
-                         : "Sprache gesetzt. Tool neu starten, damit alle Texte umgestellt sind.");
+        if (gewechselt) {
+            QMessageBox::information(this, T("Hinweis"),
+                g_lang=="en" ? "Language set. Restart the tool to apply all texts."
+                             : "Sprache gesetzt. Tool neu starten, damit alle Texte umgestellt sind.");
+        }
         settings_.save(settingsPath_);
         appendLog(T("Einstellungen gespeichert."));
     }

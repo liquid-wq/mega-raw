@@ -27,6 +27,7 @@ private slots:
     void onChooseRom();
     void onDetectGame();
     void onSetupMapper();
+    void onRestoreMappers();
     void onLogin();
     void playUnlockSound();
     void updateMonitorState();

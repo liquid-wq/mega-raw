@@ -244,6 +244,27 @@ inline QString T(const QString& s) {
         {QStringLiteral("Verbunden "), QStringLiteral("Connected ")},
         {QStringLiteral("Monitor bereit."), QStringLiteral("Monitor ready.")},
         {QStringLiteral("Erkennung fehlgeschlagen - bitte ROM von Hand waehlen."), QStringLiteral("Detection failed - please choose the ROM manually.")},
+        // Build 25: Sicherung der Original-Mapper und Wiederherstellung
+        {QStringLiteral("%1 vorhandene Datei(en) nach %2 gesichert."), QStringLiteral("%1 existing file(s) backed up to %2.")},
+        {QStringLiteral("Vorhandene Originale wurden gesichert und lassen sich in den Optionen wiederherstellen."), QStringLiteral("Existing originals were backed up and can be restored from the options.")},
+        {QStringLiteral("Original-Mapper wiederherstellen"), QStringLiteral("Restore original mappers")},
+        {QStringLiteral("Schreibt die beim Einrichten gesicherten Originaldateien auf die SD-Karte zurueck."), QStringLiteral("Writes the original files back to the SD card, as backed up during setup.")},
+        {QStringLiteral("In %1 liegt keine Sicherung."), QStringLiteral("There is no backup in %1.")},
+        {QStringLiteral("Die Sicherung enthaelt keine Dateien."), QStringLiteral("The backup contains no files.")},
+        {QStringLiteral("%1 gesicherte Datei(en) zurueckschreiben?"), QStringLiteral("Write back %1 backed up file(s)?")},
+        {QStringLiteral("Originale wiederhergestellt: %1, fehlgeschlagen: %2."), QStringLiteral("Originals restored: %1, failed: %2.")},
+        {QStringLiteral("%1 eigene Kopie(n) entfernt."), QStringLiteral("%1 of our own copies removed.")},
+        {QStringLiteral("%1 Datei(en) wiederhergestellt."), QStringLiteral("%1 file(s) restored.")},
+        {QStringLiteral("\n%1 fehlgeschlagen."), QStringLiteral("\n%1 failed.")},
+        {QStringLiteral("Die Sicherung bleibt erhalten."), QStringLiteral("The backup is kept.")},
+        {QStringLiteral("SD-Karte waehlen - das Laufwerk selbst (mit dem Ordner MEGA), z.B. H:\\"), QStringLiteral("Select the SD card - the drive itself (containing the MEGA folder), e.g. H:\\")},
+        {QStringLiteral("Bitte im naechsten Fenster die SD-Karte auswaehlen - also das Laufwerk selbst (z.B. H:\\), das den Ordner MEGA enthaelt, keinen Unterordner.\n\nDer Kern wird dann in alle Ordner kopiert, in denen Spiele liegen. Bereits vorhandene Dateien werden vorher gesichert."), QStringLiteral("In the next window, select the SD card - the drive itself (e.g. H:\\) containing the MEGA folder, not a subfolder.\n\nThe core is then copied into every folder that holds games. Existing files are backed up first.")},
+        {QStringLiteral("In %1 gibt es nichts zurueckzusetzen."), QStringLiteral("There is nothing to reset in %1.")},
+        {QStringLiteral("%1 gesicherte Originaldatei(en) zurueckschreiben."), QStringLiteral("Write back %1 backed up original file(s).")},
+        {QStringLiteral("%1 von MEGA-RAW angelegte Datei(en) entfernen."), QStringLiteral("Remove %1 file(s) placed there by MEGA-RAW.")},
+        {QStringLiteral("Fortfahren?"), QStringLiteral("Continue?")},
+        {QStringLiteral("Zuruecksetzen: %1 Original(e) zurueck, %2 eigene entfernt, %3 fehlgeschlagen."), QStringLiteral("Reset: %1 original(s) restored, %2 of our own removed, %3 failed.")},
+        {QStringLiteral("%1 Originaldatei(en) zurueckgeschrieben, %2 eigene entfernt."), QStringLiteral("%1 original file(s) written back, %2 of our own removed.")},
     };
     return tr.value(s, s);
 }
