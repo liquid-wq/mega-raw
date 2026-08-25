@@ -128,6 +128,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     monLayout->addWidget(edStatusLabel_);
     monitorHint_ = new QLabel(T("Monitor: zuerst einloggen."), monBox);
     monLayout->addWidget(monitorHint_);
+
+    // Hardcore direkt neben dem Verbinden-Knopf: die Einstellung wirkt beim
+    // Monitor-Start, also gehoert sie dorthin und nicht in einen Dialog.
+    hardcoreChk_ = new QCheckBox(T("Hardcore"), monBox);
+    hardcoreChk_->setChecked(settings_.hardcore);
+    hardcoreChk_->setToolTip(T("Im Custom-Mapper gibt es keine Savestates und keine Cheats - "
+                               "die Hardcore-Bedingung ist damit erfuellt, solange er laeuft. "
+                               "Aenderung wirkt ab dem naechsten Monitor-Start."));
+    connect(hardcoreChk_, &QCheckBox::toggled, this, [this](bool an) {
+        settings_.hardcore = an;
+        settings_.save(settingsPath_);
+    });
+    monLayout->addWidget(hardcoreChk_);
     monLayout->addWidget(monitorBtn_);
     monBox->setLayout(monLayout);
     vbox->addWidget(monBox);
@@ -707,13 +720,6 @@ void MainWindow::onOptions() {
     dlg.setWindowTitle(T("Optionen"));
     auto* v = new QVBoxLayout(&dlg);
 
-    auto* hc = new QCheckBox(T("Hardcore-Modus"), &dlg);
-    hc->setChecked(settings_.hardcore);
-    hc->setToolTip(T("Im Custom-Mapper gibt es keine Savestates und keine Cheats - "
-                     "die Hardcore-Bedingung ist damit erfuellt, solange er laeuft. "
-                     "Aenderung wirkt ab dem naechsten Monitor-Start."));
-    v->addWidget(hc);
-
     auto* langRow = new QHBoxLayout();
     langRow->addWidget(new QLabel(T("Sprache / Language:"), &dlg));
     auto* lDe = new QRadioButton("Deutsch", &dlg);
@@ -771,7 +777,6 @@ void MainWindow::onOptions() {
     });
 
     if (dlg.exec() == QDialog::Accepted) {
-        settings_.hardcore = hc->isChecked();
 
         // Den Neustart-Hinweis nur zeigen, wenn die Sprache wirklich
         // gewechselt wurde. Vorher erschien er bei jedem Speichern, auch

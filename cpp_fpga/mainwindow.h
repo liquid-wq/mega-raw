@@ -60,6 +60,7 @@ private:
     QPlainTextEdit* log_;
 
     QPushButton* monitorBtn_;
+    class QCheckBox* hardcoreChk_ = nullptr;
     QLabel* ramLabel_;
     QByteArray lastRamBytes_;
     QVector<qint64> lastByteChangeMs_;
