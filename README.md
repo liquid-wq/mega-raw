@@ -56,6 +56,8 @@ Three things happen at the same time, all inside the FPGA:
   game. The mapper catches the CPU on the next vertical blank and keeps a
   complete picture of the machine — work RAM, video RAM, colour RAM, VDP
   registers, Z80 and its memory — then puts it all back exactly as it was.
+  Since version 1.1.0 the state is written to the SD card as a file, so it
+  survives switching the console off. Four slots, four files per game.
 
 Your PC reads the live RAM mirror over USB and evaluates the achievement
 conditions there. Nothing is written back into the running game.
@@ -166,7 +168,9 @@ Drei Dinge passieren gleichzeitig, alle im FPGA:
   öffnet ein Overlay über dem laufenden Spiel. Der Mapper fängt die CPU beim
   nächsten Bildrücklauf, sichert den vollständigen Zustand — Work-RAM,
   Bildspeicher, Farbspeicher, VDP-Register, Z80 samt Speicher — und stellt ihn
-  danach exakt wieder her.
+  danach exakt wieder her. Seit Fassung 1.1.0 landet der Stand als Datei auf
+  der SD-Karte und überlebt damit das Ausschalten. Vier Slots, vier Dateien
+  je Spiel.
 
 Der PC liest den Spiegel über USB und wertet die Achievement-Bedingungen dort
 aus. In das laufende Spiel wird nichts zurückgeschrieben.

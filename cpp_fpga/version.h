@@ -27,7 +27,17 @@
 // weiter; Freischalt-Popup aus RAW-NES uebernommen; Ko-fi im Menue,
 // Fehler melden in den Optionen, Erkennungsknopf entfernt; restliche
 // deutsche Protokoll- und Monitor-Texte laufen durch T().
-#define MEGA_RAW_CPP_BUILD 24
+// 25: Speicherstaende liegen als Datei auf der SD-Karte statt nur im
+// fluechtigen PSRAM. SICHERN schreibt den 192-KB-Slot ueber den MCU
+// nach rawslotN.sst, LADEN liest ihn vor der Kennwortpruefung zurueck -
+// faellt die Datei aus, bleibt der PSRAM-Inhalt stehen wie bisher.
+// Vier Slots, vier Dateien, Ziffer aus der Menueauswahl. Der MCU holt
+// die Daten selbst per DMA aus dem PSRAM; die Warteroutine wird dafuer
+// nach $FFF000 ins Work-RAM kopiert, aus dem Mapper-Puffer heraus
+// friert die Konsole ein. Setzt den Core mit 170821 Bytes voraus.
+#define MEGA_RAW_CPP_BUILD 25
 // 1.0.0: vollstaendiger Durchlauf bis zur gebuchten Freischaltung ist
 // auf echter Hardware belegt (Mortal Kombat, 23.08.2026).
-#define MEGA_RAW_VERSION "1.0.0"
+// 1.1.0: Speicherstaende ueberleben das Ausschalten - sichern und
+// laden als Datei auf der SD-Karte, ohne PC (28.08.2026).
+#define MEGA_RAW_VERSION "1.1.0"
