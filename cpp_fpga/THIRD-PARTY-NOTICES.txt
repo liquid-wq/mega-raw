@@ -14,12 +14,13 @@ alongside the executable and may be replaced with your own build of the same
 Qt version.
 
 --------------------------------------------------------------------------
-Mega EverDrive tools and FPGA sources (mega-ed-pub) — Krikzz
-MIT License
-https://github.com/krikzz
+Mega EverDrive developer sources (mega-ed-pub) — Krikzz
+Copyright (c) Krikzz
+https://github.com/krikzz/mega-ed-pub
 
-The serial protocol (ed_protocol) and the FPGA mapper core derive from
-Krikzz's published sources. The custom mapper is built on top of them.
+Krikzz publishes these sources for development on Mega EverDrive PRO/CORE
+hardware. MEGA-RAW builds on them. All MEGA-RAW code is covered by the
+MEGA-RAW license.
 
 --------------------------------------------------------------------------
 miniz — Rich Geldreich and contributors
@@ -35,7 +36,7 @@ and badge images belong to RetroAchievements and its contributors. MEGA-RAW
 is not affiliated with or endorsed by RetroAchievements.
 
 --------------------------------------------------------------------------
-MIT License (full text, applies to the MIT-licensed components above)
+MIT License (full text, applies to miniz)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
