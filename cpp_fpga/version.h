@@ -35,9 +35,26 @@
 // die Daten selbst per DMA aus dem PSRAM; die Warteroutine wird dafuer
 // nach $FFF000 ins Work-RAM kopiert, aus dem Mapper-Puffer heraus
 // friert die Konsole ein. Setzt den Core mit 170821 Bytes voraus.
-#define MEGA_RAW_CPP_BUILD 25
+// 26: Speicherstaende gehoeren jetzt zu ihrem Spiel. Die Datei liegt neben
+// dem ROM und traegt dessen Namen plus Slotnummer
+// ("/ROMS/Z/Zero Wing (Europe).md.st1") - der Pfad kommt vom MCU
+// (CMD_ROM_PATH). Vorher benutzten alle Spiele dieselben vier Dateien in
+// der Kartenwurzel, Sichern in einem Spiel loeschte damit den Stand eines
+// anderen. Faellt die Datei aus, kehrt LADEN ins Menue zurueck, statt
+// einen fremden PSRAM-Inhalt herzustellen; $FFF000 wird vorher gesichert
+// und beim Abbruch zurueckgeschrieben (sonst laeuft das Spiel bei
+// CONTINUE in zerstoertem Arbeitsspeicher weiter).
+// Dazu: Menue auf Englisch (CONTINUE/SAVE/LOAD/EXIT), vierter Eintrag
+// EXIT kehrt ueber CMD_REINIT ins Kassettenmenue zurueck, und unter der
+// Slot-Zeile steht Datum und Uhrzeit des Standes - uebernommen aus dem
+// Zeitstempel der Datei (CMD_F_FINFO), ohne RTC-Abfrage.
+#define MEGA_RAW_CPP_BUILD 26
 // 1.0.0: vollstaendiger Durchlauf bis zur gebuchten Freischaltung ist
 // auf echter Hardware belegt (Mortal Kombat, 23.08.2026).
 // 1.1.0: Speicherstaende ueberleben das Ausschalten - sichern und
 // laden als Datei auf der SD-Karte, ohne PC (28.08.2026).
-#define MEGA_RAW_VERSION "1.1.0"
+// 1.2.0: Speicherstaende sind an das jeweilige Spiel gebunden - eigene
+// Datei neben dem ROM, kein Ueberschreiben zwischen Spielen mehr. Menue
+// auf Englisch, mit EXIT zurueck ins Kassettenmenue und Datum/Uhrzeit
+// des Standes (04.09.2026).
+#define MEGA_RAW_VERSION "1.2.0"

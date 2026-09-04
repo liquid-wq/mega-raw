@@ -49,6 +49,22 @@ Three things happen at the same time, all inside the FPGA:
   complete picture of the machine — work RAM, video RAM, colour RAM, VDP
   registers, Z80 and its memory — then puts it all back exactly as it was.
 
+  The menu offers **Continue**, **Save**, **Load** and **Exit**, with four save
+  slots. **Exit** returns to the cartridge's own menu.
+
+- **Save states belong to their game** — each state is written next to the ROM
+  it came from, carrying the game's own file name plus the slot number:
+
+  ```
+  /ROMS/Z/Zero Wing (Europe).md.st1
+  ```
+
+  Two games can therefore never share a slot, and saving in one game cannot
+  overwrite another game's state. Loading a slot that holds nothing for the
+  current game returns to the menu instead of restoring a foreign state. The
+  slot line shows when the state was written, taken from the file's own
+  timestamp.
+
 Your PC reads the live RAM mirror over USB and evaluates the achievement
 conditions there. Nothing is written back into the running game.
 
@@ -152,6 +168,23 @@ Drei Dinge passieren gleichzeitig, alle im FPGA:
   Bildspeicher, Farbspeicher, VDP-Register, Z80 samt Speicher — und stellt ihn
   danach exakt wieder her.
 
+  Das Menü bietet **Continue**, **Save**, **Load** und **Exit** mit vier Slots.
+  **Exit** kehrt ins Menü der Kassette zurück.
+
+- **Speicherstände gehören zu ihrem Spiel** — jeder Stand wird neben dem ROM
+  abgelegt, aus dem er stammt, und trägt dessen Dateinamen plus die
+  Slotnummer:
+
+  ```
+  /ROMS/Z/Zero Wing (Europe).md.st1
+  ```
+
+  Zwei Spiele können sich damit keinen Slot teilen, und Sichern in einem Spiel
+  kann den Stand eines anderen nicht überschreiben. Wird ein Slot geladen, der
+  für das laufende Spiel nichts enthält, kehrt das Menü zurück, statt einen
+  fremden Zustand herzustellen. In der Slot-Zeile steht, wann der Stand
+  geschrieben wurde — übernommen aus dem Zeitstempel der Datei.
+
 Der PC liest den Spiegel über USB und wertet die Achievement-Bedingungen dort
 aus. In das laufende Spiel wird nichts zurückgeschrieben.
 
@@ -161,8 +194,8 @@ Es gelten dieselben Grenzen wie bei jedem Hardware-Speicherstand: Spiele ohne
 Bildrücklauf-Interrupt lassen sich nicht anhalten, und die Klangbausteine lassen
 sich nicht sichern.
 
-Manche Spiele belegen die Start-Taste selbst. Reagiert **WEITER** im Menü nicht,
-stattdessen mit **C** bestätigen.
+Manche Spiele belegen die Start-Taste selbst. Reagiert **Continue** im Menü
+nicht, stattdessen mit **C** bestätigen.
 
 ## Voraussetzungen
 
