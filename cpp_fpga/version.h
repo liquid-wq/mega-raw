@@ -48,7 +48,7 @@
 // EXIT kehrt ueber CMD_REINIT ins Kassettenmenue zurueck, und unter der
 // Slot-Zeile steht Datum und Uhrzeit des Standes - uebernommen aus dem
 // Zeitstempel der Datei (CMD_F_FINFO), ohne RTC-Abfrage.
-#define MEGA_RAW_CPP_BUILD 26
+#define MEGA_RAW_CPP_BUILD 27
 // 1.0.0: vollstaendiger Durchlauf bis zur gebuchten Freischaltung ist
 // auf echter Hardware belegt (Mortal Kombat, 23.08.2026).
 // 1.1.0: Speicherstaende ueberleben das Ausschalten - sichern und
@@ -57,4 +57,4 @@
 // Datei neben dem ROM, kein Ueberschreiben zwischen Spielen mehr. Menue
 // auf Englisch, mit EXIT zurueck ins Kassettenmenue und Datum/Uhrzeit
 // des Standes (04.09.2026).
-#define MEGA_RAW_VERSION "1.2.0"
+#define MEGA_RAW_VERSION "1.2.1"
