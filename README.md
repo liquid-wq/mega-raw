@@ -30,7 +30,7 @@ cartridge by itself, and brings its own in-game save state menu along.
 | Hook database needed | no | yes |
 | 2 MB size limit | no | yes |
 | In-game save state menu | yes, its own | the EverDrive's own |
-| Hardcore mode | yes | yes |
+| Hardcore mode | planned, see below | no |
 | Games prepared | any Mega Drive cartridge | 602 patched titles |
 
 The FPGA build replaces the cartridge mapper with a custom core. Nothing is
@@ -91,10 +91,15 @@ menu, confirm with **C** instead.
 
 ## Hardcore mode
 
-MEGA-RAW checks your setup before and during a session and only counts Hardcore
-when the conditions are actually met. If the EverDrive's own in-game menu is
-enabled, MEGA-RAW says so and switches to Softcore, so no Hardcore unlock happens
-on a configuration that would not qualify.
+Hardcore is planned, but not active yet. RetroAchievements only counts Hardcore
+unlocks from clients it has approved, and a client has to be publicly available
+for at least six months before it can be considered. MEGA-RAW is still too new
+for that, and it also has to pass a set of checks by RetroAchievements. Until
+then, every unlock is recorded as Softcore.
+
+The groundwork is already in place: MEGA-RAW checks your setup before and during
+a session. If the EverDrive's in-game menu or cheats are enabled, it says so and
+stays in Softcore.
 
 ## License
 
@@ -141,7 +146,7 @@ Speicherstände mit.
 | Hook-Datenbank nötig | nein | ja |
 | 2-MB-Grenze | nein | ja |
 | Ingame-Menü für Speicherstände | ja, ein eigenes | das des EverDrive |
-| Hardcore-Modus | ja | ja |
+| Hardcore-Modus | geplant, siehe unten | nein |
 | Vorbereitete Spiele | jede Mega-Drive-Kassette | 602 gepatchte Titel |
 
 Die FPGA-Fassung ersetzt den Kassetten-Mapper durch einen eigenen Kern. Es wird
@@ -205,9 +210,15 @@ stattdessen mit **C** bestätigen.
 
 ## Hardcore-Modus
 
-MEGA-RAW prüft die Einrichtung vor und während einer Sitzung und wertet Hardcore
-nur, wenn die Bedingungen tatsächlich erfüllt sind. Ist das Ingame-Menü des
-EverDrive eingeschaltet, weist MEGA-RAW darauf hin und stuft auf Softcore zurück.
+Hardcore ist geplant, aber noch nicht aktiv. RetroAchievements wertet
+Hardcore-Freischaltungen nur von Programmen, die es freigegeben hat, und ein
+Programm muss dafür mindestens sechs Monate öffentlich verfügbar sein. Dafür ist
+MEGA-RAW noch zu neu, außerdem muss es eine Reihe von Prüfungen durch
+RetroAchievements bestehen. Bis dahin wird jede Freischaltung als Softcore gebucht.
+
+Die Grundlage ist schon vorhanden: MEGA-RAW prüft die Einrichtung vor und während
+einer Sitzung. Sind das Ingame-Menü oder Cheats des EverDrive eingeschaltet, weist
+MEGA-RAW darauf hin und bleibt bei Softcore.
 
 ## Lizenz
 
