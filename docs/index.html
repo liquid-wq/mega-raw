@@ -195,9 +195,14 @@ footer p{max-width:64ch;margin:0 0 12px}
 footer a{color:var(--amber);text-decoration:none;border-bottom:1px solid var(--line-hot)}
 footer a:hover{border-color:var(--amber)}
 
+  /* Zurueck zur Uebersicht, oben links */
+  .back{position:fixed;top:14px;left:16px;z-index:10;font-size:13px;letter-spacing:.06em;color:var(--amber-dim);text-decoration:none;border:1px solid var(--line-hot);background:rgba(7,6,5,.85);padding:6px 12px;transition:color .14s,border-color .14s}
+  .back:hover,.back:focus-visible{color:var(--amber);border-color:var(--amber)}
 </style>
 </head>
 <body>
+<a class="back" href="https://liquid-wq.github.io/" aria-label="Back to all projects">&larr; All projects</a>
+
 
 <main class="wrap">
 
