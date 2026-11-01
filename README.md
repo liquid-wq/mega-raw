@@ -73,8 +73,10 @@ menu, confirm with **C** instead.
 ## Requirements
 
 - Mega EverDrive CORE (Krikzz) — this is what MEGA-RAW is developed and tested on.
-  The PRO uses the same interface and should work, but has not been tested.
-  Other models are untested.
+- Mega EverDrive PRO — experimental support since 1.3.0. Achievements work there
+  according to tester feedback, the in-game menu does not work on the PRO yet.
+  Feedback is welcome as a [GitHub Issue](https://github.com/liquid-wq/mega-raw/issues).
+- Other models are untested.
 - Original Mega Drive / Genesis hardware
 - USB connection between EverDrive and PC
 - Windows
@@ -83,9 +85,12 @@ menu, confirm with **C** instead.
 ## Setup
 
 1. Download the latest release and unpack it.
-2. Start the program and log in with your RetroAchievements account.
-3. Use **Set up mapper on SD card** and point it at your SD card. The custom core
-   is copied to every location the console loads from.
+2. Start the program and log in with your RetroAchievements account. With
+   **Stay logged in** the program signs you in by itself next time; your
+   password is not stored.
+3. Use **Set up mapper on SD card** and point it at your SD card. The custom
+   cores for both devices (CORE and PRO) are copied to every location the
+   console loads from; each device picks its own file.
 4. Put the card back into the console and start a game.
 5. Press **Connect & start monitor**. The game is detected automatically.
 
@@ -191,9 +196,11 @@ stattdessen mit **C** bestätigen.
 
 ## Voraussetzungen
 
-- Mega EverDrive CORE (Krikzz) — darauf wird entwickelt und getestet. Das PRO hat
-  dieselbe Schnittstelle und sollte laufen, ist aber ungetestet. Andere Modelle
-  sind ungetestet.
+- Mega EverDrive CORE (Krikzz) — darauf wird entwickelt und getestet.
+- Mega EverDrive PRO — seit 1.3.0 testweise unterstützt. Achievements funktionieren
+  dort laut Rückmeldung eines Testers, das Ingame-Menü läuft auf dem PRO noch nicht.
+  Rückmeldungen gern als [GitHub Issue](https://github.com/liquid-wq/mega-raw/issues).
+- Andere Modelle sind ungetestet.
 - Original Mega Drive / Genesis
 - USB-Verbindung zwischen EverDrive und PC
 - Windows
@@ -202,9 +209,12 @@ stattdessen mit **C** bestätigen.
 ## Einrichtung
 
 1. Die aktuelle Fassung herunterladen und entpacken.
-2. Programm starten und mit dem RetroAchievements-Konto anmelden.
-3. **Mapper auf SD-Karte einrichten** wählen und die SD-Karte angeben. Der eigene
-   Kern wird an alle Stellen kopiert, von denen die Konsole lädt.
+2. Programm starten und mit dem RetroAchievements-Konto anmelden. Mit
+   **Eingeloggt bleiben** meldet sich das Programm beim nächsten Start selbst
+   an; das Passwort wird nicht gespeichert.
+3. **Mapper auf SD-Karte einrichten** wählen und die SD-Karte angeben. Die
+   eigenen Kerne für beide Geräte (CORE und PRO) werden an alle Stellen
+   kopiert, von denen die Konsole lädt; jedes Gerät nimmt seine eigene Datei.
 4. Karte zurück in die Konsole stecken und ein Spiel starten.
 5. **Verbinden & Monitor starten** drücken. Das Spiel wird automatisch erkannt.
 
