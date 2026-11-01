@@ -42,6 +42,16 @@ std::optional<std::string> RaClient::ra_login(const std::string& user, const std
     return token->as_string();
 }
 
+std::optional<std::string> RaClient::ra_login_token(const std::string& user, const std::string& token) {
+    Json d = request_({{"r", "login2"}, {"u", user}, {"t", token}});
+    const Json* success = d.find("Success");
+    bool ok = success && success->type() == Json::Type::Bool && success->as_bool();
+    if (!ok) return std::nullopt;
+    const Json* neu = d.find("Token");
+    if (!neu || neu->type() != Json::Type::String) return std::nullopt;
+    return neu->as_string();
+}
+
 std::optional<Json> RaClient::ra_patch(long long gameid, const std::string& user, const std::string& token) {
     std::string key = std::to_string(gameid);
     const Json* cached = cache_.patch_get(key);
@@ -75,9 +85,11 @@ std::optional<Json> RaClient::ra_patch(long long gameid, const std::string& user
 }
 
 bool RaClient::ra_award(long long achid, const std::string& user, const std::string& token, int hardcore) {
+    last_award_reply.clear();
     try {
         Json d = request_({{"r", "awardachievement"}, {"a", std::to_string(achid)},
                             {"h", std::to_string(hardcore)}, {"u", user}, {"t", token}});
+        last_award_reply = d.dump();
         const Json* success = d.find("Success");
         return success && success->type() == Json::Type::Bool && success->as_bool();
     } catch (...) {

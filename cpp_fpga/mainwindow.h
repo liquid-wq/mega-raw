@@ -46,6 +46,11 @@ private:
     QLineEdit* userEdit_;
     QLineEdit* passEdit_;
     QPushButton* loginBtn_;
+    class QCheckBox* rememberChk_ = nullptr;
+    void speichereLogin();
+    void onLogout();
+    void zeigeAnmeldung(const QString& name, bool automatisch);
+    void holeNachricht();
     QLabel* loginStatus_;
 
     QLineEdit* romPathEdit_;

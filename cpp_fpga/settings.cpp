@@ -17,6 +17,7 @@ Settings Settings::load(const QString& path) {
         if (auto* v = j.find("save_login")) if (v->type()==Json::Type::Bool) s.save_login = v->as_bool();
         if (auto* v = j.find("user"))      if (v->type()==Json::Type::String) s.user = QString::fromStdString(v->as_string());
         if (auto* v = j.find("token"))     if (v->type()==Json::Type::String) s.token = QString::fromStdString(v->as_string());
+        if (auto* v = j.find("message_read")) if (v->type()==Json::Type::Int) s.message_read = v->as_int();
     } catch (...) {}
     return s;
 }
@@ -29,6 +30,7 @@ void Settings::save(const QString& path) const {
     j.set("save_login", Json::boolean(save_login));
     j.set("user", Json::string(user.toStdString()));
     j.set("token", Json::string(token.toStdString()));
+    j.set("message_read", Json::integer(message_read));
     std::ofstream o(path.toStdString(), std::ios::binary);
     o << j.dump(1);
 }

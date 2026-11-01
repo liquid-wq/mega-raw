@@ -1,5 +1,9 @@
 #include "mainwindow.h"
 #include "version.h"
+
+// Hardcore erst einschalten, wenn RetroAchievements das Programm dafuer
+// freigegeben hat. Bis dahin ist die Option verborgen und jede Sitzung Softcore.
+static constexpr bool kHardcoreAktiv = false;
 #include "i18n.h"
 #include "compat.h"
 #include "badge_loader.h"
@@ -25,6 +29,9 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QFileDialog>
+#include <QPropertyAnimation>
+#include <QSequentialAnimationGroup>
+#include <QGraphicsOpacityEffect>
 #include <QDirIterator>
 #include <QInputDialog>
 #include <QSet>
@@ -98,6 +105,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     loginLayout->addWidget(userEdit_);
     loginLayout->addWidget(passEdit_);
     loginLayout->addWidget(loginBtn_);
+    // Eingeloggt bleiben: gespeichert wird nur der Sitzungsschluessel, nie das Passwort.
+    rememberChk_ = new QCheckBox(T("Eingeloggt bleiben"), loginBox);
+    rememberChk_->setChecked(settings_.save_login);
+    rememberChk_->setToolTip(T("Benutzername und Anmeldeschluessel speichern (das Passwort wird nicht gespeichert)"));
+    if (!settings_.user.isEmpty()) userEdit_->setText(settings_.user);
+    loginLayout->addWidget(rememberChk_);
     loginBox->setLayout(loginLayout);
     vbox->addWidget(loginBox);
     loginStatus_ = new QLabel(T("Nicht eingeloggt."), central);
@@ -131,11 +144,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // Hardcore direkt neben dem Verbinden-Knopf: die Einstellung wirkt beim
     // Monitor-Start, also gehoert sie dorthin und nicht in einen Dialog.
+    // Solange RetroAchievements das Programm nicht fuer Hardcore freigegeben
+    // hat, wertet der Server jede Buchung als Softcore. Die Option bleibt
+    // dann verborgen und wirkungslos (kHardcoreAktiv).
     hardcoreChk_ = new QCheckBox(T("Hardcore"), monBox);
+    hardcoreChk_->setVisible(kHardcoreAktiv);
     hardcoreChk_->setChecked(settings_.hardcore);
-    hardcoreChk_->setToolTip(T("Im Custom-Mapper gibt es keine Savestates und keine Cheats - "
-                               "die Hardcore-Bedingung ist damit erfuellt, solange er laeuft. "
-                               "Aenderung wirkt ab dem naechsten Monitor-Start."));
+    hardcoreChk_->setToolTip(T("Hardcore erfordert, dass In-Game-Menue (Savestates) UND Cheats "
+                               "im EverDrive-System-Menue abgeschaltet sind. Ist eines aktiv, "
+                               "laeuft die Sitzung als Softcore. Wirkt ab dem naechsten Monitor-Start."));
     connect(hardcoreChk_, &QCheckBox::toggled, this, [this](bool an) {
         settings_.hardcore = an;
         settings_.save(settingsPath_);
@@ -149,6 +166,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         "background-color: #0a0e14; border: 1px solid #2a3a4a; "
         "border-radius: 4px; padding: 6px 10px; color: #3dd68c;");
     ramLabel_->setMinimumHeight(28);
+    // Grosse Sets (Castlevania: 303 Byte) duerfen das Fenster nicht verbreitern:
+    // umbrechen, Breite vom Fenster vorgeben lassen.
+    ramLabel_->setWordWrap(true);
+    ramLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     vbox->addWidget(ramLabel_);
 
     acList_ = new QListWidget(central);
@@ -202,15 +223,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(chooseBtn_, &QPushButton::clicked, this, &MainWindow::onChooseRom);
     connect(setupMapperBtn_, &QPushButton::clicked, this, &MainWindow::onSetupMapper);
     connect(loginBtn_, &QPushButton::clicked, this, &MainWindow::onLogin);
+    connect(rememberChk_, &QCheckBox::toggled, this, [this](bool) { speichereLogin(); });
     connect(monitorBtn_, &QPushButton::clicked, this, &MainWindow::onToggleMonitor);
 
     // Tooltips
     chooseBtn_->setToolTip(T("Spiel waehlen (ROM/ZIP/RAR) und Achievement-Set laden."));
     setupMapperBtn_->setToolTip(T("Durchsucht die SD-Karte nach Ordnern mit ROMs und legt "
-                                  "mega-core.x25 in jeden davon. Ohne diese Datei laedt die "
-                                  "Konsole den Standard-Mapper und es gibt keine Achievements."));
+                                  "mega-core.x25 (CORE) und mega-pro.rbf (PRO) in jeden davon. "
+                                  "Ohne diese Dateien laedt die Konsole den Standard-Mapper und "
+                                  "es gibt keine Achievements."));
     monitorBtn_->setToolTip(T("Startet die Live-Ueberwachung: liest per USB den Spielstand und schaltet Achievements frei. Spiel auf der Konsole starten."));
 
+    // Gespeicherter Schluessel: beim Start bei RA pruefen und damit anmelden.
+    if (settings_.save_login && !settings_.user.isEmpty() && !settings_.token.isEmpty())
+        QTimer::singleShot(0, this, &MainWindow::onLogin);
 
     // Update-Check 2s nach Start (async, blockiert UI nicht)
     QTimer::singleShot(2000, this, &MainWindow::checkForUpdate);
@@ -241,6 +267,67 @@ void MainWindow::checkForUpdate() {
             }
         }
         reply->deleteLater(); nam->deleteLater();
+        holeNachricht();
+    });
+}
+
+// Nachricht an die Nutzer, unabhaengig von der Update-Zahl. Datei auf der Seite:
+//   { "id": 1, "de": "...", "en": "...", "link": "https://...",
+//     "ab_build": 29, "bis_build": 40 }
+// id fuer jede neue Nachricht hochzaehlen (0 oder fehlend = keine). link,
+// ab_build, bis_build optional. Jede id wird nur einmal gezeigt (settings.json
+// "message_read"). Fehlt die Datei oder ist sie fehlerhaft: still.
+void MainWindow::holeNachricht() {
+    auto* nam = new QNetworkAccessManager(this);
+    QNetworkRequest req(QUrl("https://liquid-wq.github.io/data/nachricht_megaraw.json"));
+    req.setHeader(QNetworkRequest::UserAgentHeader, "MEGA-RAW-Nachricht");
+    QNetworkReply* reply = nam->get(req);
+    auto* timer = new QTimer(this);
+    timer->setSingleShot(true);
+    connect(timer, &QTimer::timeout, reply, &QNetworkReply::abort);
+    timer->start(8000);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, nam, timer]() {
+        timer->stop(); timer->deleteLater();
+        QByteArray body = reply->error() == QNetworkReply::NoError ? reply->readAll() : QByteArray();
+        reply->deleteLater(); nam->deleteLater();
+        if (body.startsWith("\xEF\xBB\xBF")) body.remove(0, 3);   // mit Stueckliste gespeichert
+        if (body.isEmpty()) return;
+        long long id = 0;
+        QString de, en, link;
+        try {
+            Json j = Json::parse(body.toStdString());
+            if (j.type() != Json::Type::Object) return;
+            auto zahl = [&](const char* k, long long vorgabe) {
+                const Json* v = j.find(k);
+                return (v && v->type() == Json::Type::Int) ? static_cast<long long>(v->as_int()) : vorgabe;
+            };
+            auto text = [&](const char* k) {
+                const Json* v = j.find(k);
+                return (v && v->type() == Json::Type::String) ? QString::fromStdString(v->as_string()) : QString();
+            };
+            id = zahl("id", 0);
+            if (id <= 0 || id == settings_.message_read) return;
+            if (MEGA_RAW_CPP_BUILD < zahl("ab_build", 0) || MEGA_RAW_CPP_BUILD > zahl("bis_build", 1000000)) return;
+            de = text("de").left(4000);
+            en = text("en").left(4000);
+            link = text("link");
+            if (!link.startsWith("https://")) link.clear();   // nur sichere Adressen
+        } catch (...) {
+            return;
+        }
+        if (de.isEmpty() && en.isEmpty()) return;
+        QString t = (g_lang == "en") ? (en.isEmpty() ? de : en) : (de.isEmpty() ? en : de);
+        QMessageBox box(this);
+        box.setWindowTitle(T("Nachricht"));
+        box.setTextFormat(Qt::PlainText);            // reiner Text, kein HTML aus dem Netz
+        box.setText(t);
+        QPushButton* oeffnen = nullptr;
+        if (!link.isEmpty()) oeffnen = box.addButton(T("Link oeffnen"), QMessageBox::ActionRole);
+        box.addButton(QMessageBox::Ok);
+        box.exec();
+        if (oeffnen && box.clickedButton() == oeffnen) QDesktopServices::openUrl(QUrl(link));
+        settings_.message_read = id;
+        settings_.save(settingsPath_);
     });
 }
 
@@ -294,41 +381,132 @@ void MainWindow::rebuildAcList() {
     }
 }
 
+// Nur der Schluessel, nie das Passwort - und nur mit gesetztem Haken.
+void MainWindow::speichereLogin() {
+    settings_.save_login = rememberChk_->isChecked();
+    if (settings_.save_login && !token_.isEmpty()) {
+        settings_.user = userEdit_->text();
+        settings_.token = token_;
+    } else if (!settings_.save_login) {
+        settings_.user.clear();
+        settings_.token.clear();
+    }
+    settings_.save(settingsPath_);
+}
+
+// Kurze Einblendung nach erfolgreicher Anmeldung: Text erscheint mittig,
+// blinkt dreimal, gleitet nach links und bleibt als "✓ Name" stehen.
+void MainWindow::zeigeAnmeldung(const QString& name, bool automatisch) {
+    QWidget* p = loginStatus_->parentWidget();
+    const QString endText = QString::fromUtf8("✓ ") + name;
+    const QString text = QString::fromUtf8("✓ ") +
+        (automatisch ? T("Automatisch angemeldet als %1 (per Sitzungstoken)") : T("Angemeldet als %1")).arg(name);
+
+    auto* lbl = new QLabel(text, p);
+    QFont f = loginStatus_->font();
+    f.setBold(true);
+    lbl->setFont(f);
+    lbl->setStyleSheet("color: #00ff00;");
+    lbl->adjustSize();
+    const QRect r = loginStatus_->geometry();
+    const QPoint start(r.x() + (r.width() - lbl->width()) / 2, r.y() + (r.height() - lbl->height()) / 2);
+    const QPoint ziel(r.x(), start.y());
+    lbl->move(start);
+    loginStatus_->setText(QString());
+    lbl->show();
+    lbl->raise();
+
+    auto* eff = new QGraphicsOpacityEffect(lbl);
+    lbl->setGraphicsEffect(eff);
+    auto* blink = new QPropertyAnimation(eff, "opacity", lbl);
+    blink->setDuration(9500);                       // ruhige Pulse, je gut eine Sekunde
+    blink->setKeyValueAt(0.0, 0.0);
+    const int pulse = 8;
+    for (int i = 0; i < pulse; ++i) {
+        blink->setKeyValueAt((i * 2 + 1) / (2.0 * pulse), 1.0);
+        blink->setKeyValueAt((i * 2 + 2) / (2.0 * pulse), i == pulse - 1 ? 1.0 : 0.25);
+    }
+    blink->setEasingCurve(QEasingCurve::InOutSine);
+    auto* weg = new QPropertyAnimation(lbl, "pos", lbl);
+    weg->setDuration(700);
+    weg->setStartValue(start);
+    weg->setEndValue(ziel);
+    weg->setEasingCurve(QEasingCurve::InOutCubic);
+
+    auto* ablauf = new QSequentialAnimationGroup(lbl);
+    ablauf->addAnimation(blink);
+    ablauf->addPause(600);
+    ablauf->addAnimation(weg);
+    connect(ablauf, &QSequentialAnimationGroup::finished, this, [this, lbl, endText]() {
+        if (!token_.isEmpty()) loginStatus_->setText(endText);
+        lbl->deleteLater();
+    });
+    ablauf->start();
+}
+
+void MainWindow::onLogout() {
+    stopMonitorIfRunning();
+    token_.clear();
+    settings_.token.clear();
+    settings_.save(settingsPath_);
+    loginStatus_->setText(T("Nicht eingeloggt."));
+    loginStatus_->setStyleSheet("");
+    loginBtn_->setText(T("Login"));
+    userEdit_->setEnabled(true);
+    passEdit_->setEnabled(true);
+    appendLog(T("Abgemeldet."));
+    updateMonitorState();
+}
+
 void MainWindow::onLogin() {
+    if (!token_.isEmpty()) { onLogout(); return; }   // Knopf zeigt dann "Abmelden"
     std::string user = userEdit_->text().toStdString();
     std::string pw = passEdit_->text().toStdString();
-    if (user.empty() || pw.empty()) {
+    // Ohne eingegebenes Passwort: mit dem gespeicherten Schluessel anmelden.
+    std::string schluessel = (pw.empty() && userEdit_->text() == settings_.user)
+                                 ? settings_.token.toStdString() : std::string();
+    if (user.empty() || (pw.empty() && schluessel.empty())) {
         loginStatus_->setText(T("Bitte Benutzername und Passwort eingeben."));
         return;
     }
     loginBtn_->setEnabled(false);
     loginStatus_->setText(T("Login laeuft..."));
     auto* thread = new QThread(this);
-    QObject::connect(thread, &QThread::started, thread, [this, user, pw, thread]() {
+    QObject::connect(thread, &QThread::started, thread, [this, user, pw, schluessel, thread]() {
         QString statusText, styleSheet;
         QString newToken;
         bool ok = false;
         try {
-            auto tok = client_->ra_login(user, pw);
+            auto tok = pw.empty() ? client_->ra_login_token(user, schluessel)
+                                  : client_->ra_login(user, pw);
             if (tok) {
                 newToken = QString::fromStdString(*tok);
                 statusText = QString::fromUtf8("\u2713 ") + QString::fromStdString(user);
                 styleSheet = "color: #00ff00;";
                 ok = true;
             } else {
-                statusText = T("Login fehlgeschlagen (falsche Zugangsdaten?).");
+                statusText = pw.empty() ? T("Anmeldung abgelaufen -- bitte das Passwort eingeben.")
+                                        : T("Login fehlgeschlagen (falsche Zugangsdaten?).");
             }
         } catch (const RateLimited& e) {
             statusText = QString("RA drosselt, bitte %1s warten.").arg(e.retry_after);
         } catch (const std::exception& e) {
             statusText = QString("Netzwerkfehler: %1").arg(e.what());
         }
-        QMetaObject::invokeMethod(this, [this, statusText, styleSheet, newToken, ok]() {
+        const bool automatisch = pw.empty();
+        const QString name = QString::fromStdString(user);
+        QMetaObject::invokeMethod(this, [this, statusText, styleSheet, newToken, ok, automatisch, name]() {
             loginBtn_->setEnabled(true);
             loginStatus_->setText(statusText);
             if (ok) {
                 loginStatus_->setStyleSheet(styleSheet);
+                zeigeAnmeldung(name, automatisch);
                 token_ = newToken;
+                passEdit_->clear();                  // das Passwort wird nicht weiter gebraucht
+                userEdit_->setEnabled(false);
+                passEdit_->setEnabled(false);
+                loginBtn_->setText(T("Abmelden"));
+                speichereLogin();
                 appendLog(T("Login erfolgreich."));
                 updateMonitorState();
             }
@@ -370,7 +548,7 @@ void MainWindow::onSetupMapper() {
         T("SD-Karte waehlen - das Laufwerk selbst (mit dem Ordner MEGA), z.B. H:\\"), settings_.rom_root);
     if (root.isEmpty()) return;
     settings_.rom_root = root;
-    settings_.save();
+    settings_.save(settingsPath_);
 
     static const QStringList romExt = {
         "*.md", "*.bin", "*.gen", "*.smd", "*.68k", "*.sgd",
@@ -412,27 +590,40 @@ void MainWindow::onSetupMapper() {
     // (Krikzz' Kerne), die sonst ersatzlos verloren waeren. Gesichert wird
     // nur beim ersten Mal je Ordner - ein zweiter Durchlauf darf die bereits
     // gesicherte Originaldatei nicht durch unsere eigene ueberschreiben.
+    // Beide Kerne neben jedes ROM: mega-core.x25 laedt das CORE,
+    // mega-pro.rbf das PRO (fpga/README.md). Jedes Geraet nimmt nur seine
+    // eigene Datei, die andere bleibt unbeachtet - so muss das Geraet nicht
+    // erkannt werden, und die Karte passt in beide.
+    QList<QPair<QString, QString>> kerne;   // Quelle, Dateiname auf der Karte
+    kerne << qMakePair(src, QString("mega-core.x25"));
+    const QString srcPro = QDir(appDir).filePath("mega-pro.rbf");
+    if (QFile::exists(srcPro)) kerne << qMakePair(srcPro, QString("mega-pro.rbf"));
+
     const QString bakRoot = QDir(root).filePath(kBackupDir);
     int ok = 0, fail = 0, saved = 0;
     for (const QString& d : targets) {
-        const QString dst = QDir(d).filePath("mega-core.x25");
+        bool ordnerOk = true;
+        for (const auto& k : kerne) {
+            const QString dst = QDir(d).filePath(k.second);
 
-        // Nur sichern, was NICHT schon unser eigener Kern ist. Sonst legt
-        // ein zweiter Durchlauf lauter Sicherungen unserer eigenen Datei an -
-        // eine Wiederherstellung waere dann wirkungslos.
-        if (QFile::exists(dst) && QFileInfo(dst).size() != QFileInfo(src).size()) {
-            const QString rel = QDir(root).relativeFilePath(d);
-            const QString bakDir = (rel == "." || rel.isEmpty())
-                                 ? bakRoot : QDir(bakRoot).filePath(rel);
-            const QString bak = QDir(bakDir).filePath("mega-core.x25");
-            if (!QFile::exists(bak)) {
-                QDir().mkpath(bakDir);
-                if (QFile::copy(dst, bak)) ++saved;
+            // Nur sichern, was NICHT schon unser eigener Kern ist. Sonst legt
+            // ein zweiter Durchlauf lauter Sicherungen unserer eigenen Datei an -
+            // eine Wiederherstellung waere dann wirkungslos.
+            if (QFile::exists(dst) && QFileInfo(dst).size() != QFileInfo(k.first).size()) {
+                const QString rel = QDir(root).relativeFilePath(d);
+                const QString bakDir = (rel == "." || rel.isEmpty())
+                                     ? bakRoot : QDir(bakRoot).filePath(rel);
+                const QString bak = QDir(bakDir).filePath(k.second);
+                if (!QFile::exists(bak)) {
+                    QDir().mkpath(bakDir);
+                    if (QFile::copy(dst, bak)) ++saved;
+                }
             }
-        }
 
-        QFile::remove(dst);
-        if (QFile::copy(src, dst)) ++ok; else ++fail;
+            QFile::remove(dst);
+            if (!QFile::copy(k.first, dst)) ordnerOk = false;
+        }
+        if (ordnerOk) ++ok; else ++fail;
     }
 
     if (saved > 0) {
@@ -442,7 +633,8 @@ void MainWindow::onSetupMapper() {
     appendLog(QString(T("Mapper eingerichtet: %1 Ordner beschrieben, %2 fehlgeschlagen."))
               .arg(ok).arg(fail));
     QMessageBox::information(this, T("Mapper einrichten"),
-        QString(T("mega-core.x25 in %1 Ordner kopiert.")).arg(ok)
+        QString(kerne.size() > 1 ? T("mega-core.x25 und mega-pro.rbf in %1 Ordner kopiert.")
+                                 : T("mega-core.x25 in %1 Ordner kopiert.")).arg(ok)
         + (fail ? QString(T("\n%1 Ordner konnten nicht beschrieben werden.")).arg(fail)
                 : QString())
         + (saved ? QString("\n\n") + T("Vorhandene Originale wurden gesichert und lassen "
@@ -454,10 +646,11 @@ void MainWindow::onSetupMapper() {
 // Ohne diesen Weg waere ein Nutzer, der die Karte wieder ohne MEGA-RAW
 // benutzen will, auf ein eigenes Backup angewiesen.
 void MainWindow::onRestoreMappers() {
-    // Unsere eigene Datei zum Vergleich - alles, was genauso gross ist,
+    // Unsere eigenen Dateien zum Vergleich - alles, was genauso gross ist,
     // stammt von uns und darf entfernt werden, wenn es kein Original gab.
-    const QString srcRef = QDir(QCoreApplication::applicationDirPath())
-                           .filePath("mega-core.x25");
+    // Beide Kerne: mega-core.x25 (CORE) und mega-pro.rbf (PRO).
+    const QStringList kernNamen = {"mega-core.x25", "mega-pro.rbf"};
+    const QString appDir = QCoreApplication::applicationDirPath();
 
     const QString root = QFileDialog::getExistingDirectory(this,
         T("SD-Karte waehlen - das Laufwerk selbst (mit dem Ordner MEGA), z.B. H:\\"), settings_.rom_root);
@@ -471,17 +664,19 @@ void MainWindow::onRestoreMappers() {
     // trotzdem etwas: unsere eigenen Kopien.
     QStringList gesichert;
     if (QDir(bakRoot).exists()) {
-        QDirIterator bit(bakRoot, QStringList{"mega-core.x25"}, QDir::Files,
+        QDirIterator bit(bakRoot, kernNamen, QDir::Files,
                          QDirIterator::Subdirectories);
         while (bit.hasNext()) gesichert << bit.next();
     }
 
-    // Unsere eigenen Kopien einsammeln: gleiche Groesse wie die Datei neben
-    // der Anwendung, ausserhalb des Sicherungsordners.
-    const qint64 unsereGroesse = QFileInfo::exists(srcRef) ? QFileInfo(srcRef).size() : 0;
+    // Unsere eigenen Kopien einsammeln: gleiche Groesse wie die gleichnamige
+    // Datei neben der Anwendung, ausserhalb des Sicherungsordners.
     QStringList eigene;
-    if (unsereGroesse > 0) {
-        QDirIterator uit(root, QStringList{"mega-core.x25"}, QDir::Files,
+    for (const QString& name : kernNamen) {
+        const QString srcRef = QDir(appDir).filePath(name);
+        const qint64 unsereGroesse = QFileInfo::exists(srcRef) ? QFileInfo(srcRef).size() : 0;
+        if (unsereGroesse <= 0) continue;
+        QDirIterator uit(root, QStringList{name}, QDir::Files,
                          QDirIterator::Subdirectories);
         while (uit.hasNext()) {
             const QString f = uit.next();
@@ -558,7 +753,7 @@ bool MainWindow::detectGame() {
     }
     if (build == 0 || build == 0xFF) {
         edPtr->close();
-        appendLog(T("Der RA-Mapper laeuft nicht - mega-core.x25 muss neben dem ROM liegen."));
+        appendLog(T("Der RA-Mapper laeuft nicht - mega-core.x25 (CORE) bzw. mega-pro.rbf (PRO) muss neben dem ROM liegen."));
         return false;
     }
 
@@ -668,7 +863,7 @@ void MainWindow::tryLoadGame(const std::string& md5) {
 
         // Bereits freigeschaltete Achievements golden markieren
         try {
-            auto owned = client_->ra_unlocks(*gid, userEdit_->text().toStdString(), token_.toStdString(), settings_.hardcore);
+            auto owned = client_->ra_unlocks(*gid, userEdit_->text().toStdString(), token_.toStdString(), kHardcoreAktiv && settings_.hardcore);
             int nOwned = 0;
             for (auto& a : g.achievements) {
                 if (owned.count(a.id)) { a.owned = true; a.triggered = true; nOwned++; }
@@ -799,10 +994,14 @@ void MainWindow::stopMonitorIfRunning() {
     if (monThread_) {
         if (monWorker_) monWorker_->stop();
         monThread_->quit();
-        monThread_->wait(3000);
-        monThread_->deleteLater();
+        QThread* t = monThread_;
         monThread_ = nullptr;
         monWorker_ = nullptr;
+        // Ein QThread darf nie zerstoert werden, solange er laeuft - das
+        // beendet das ganze Programm. Laeuft er nach der Wartezeit noch,
+        // raeumt er sich selbst auf, sobald er fertig ist.
+        if (t->wait(5000)) t->deleteLater();
+        else { t->setParent(nullptr); connect(t, &QThread::finished, t, &QObject::deleteLater); }
     }
 }
 
@@ -840,7 +1039,7 @@ void MainWindow::onToggleMonitor() {
 
     monThread_ = new QThread(this);
     Game gm = game_ ? *game_ : Game{};
-    monWorker_ = new MonitorWorker(port, gm, userEdit_->text(), token_, client_, 0, settings_.hardcore);
+    monWorker_ = new MonitorWorker(port, gm, userEdit_->text(), token_, client_, 0, kHardcoreAktiv && settings_.hardcore);
     monWorker_->moveToThread(monThread_);
 
     connect(monThread_, &QThread::started, monWorker_, &MonitorWorker::start);
@@ -865,7 +1064,7 @@ void MainWindow::onToggleMonitor() {
             }
             {
                 try {
-                    auto owned = client_->ra_unlocks(gid, userEdit_->text().toStdString(), token_.toStdString(), settings_.hardcore);
+                    auto owned = client_->ra_unlocks(gid, userEdit_->text().toStdString(), token_.toStdString(), kHardcoreAktiv && settings_.hardcore);
                     int nOwned = 0;
                     for (auto& a : g.achievements)
                         if (owned.count(a.id)) { a.owned = true; a.triggered = true; nOwned++; }
@@ -893,6 +1092,14 @@ void MainWindow::onToggleMonitor() {
     connect(monWorker_, &MonitorWorker::unlocked, this, &MainWindow::onWorkerUnlocked);
     connect(monWorker_, &MonitorWorker::connectionLost, this, &MainWindow::onWorkerConnectionLost);
     connect(monWorker_, &MonitorWorker::coreMissing, this, &MainWindow::onWorkerCoreMissing);
+    connect(monWorker_, &MonitorWorker::gameLeft, this, [this]() {
+        // Wie ein Stopp von Hand: Spielzustand verwerfen, damit der naechste
+        // Start das neue Spiel erkennt statt das alte weiterzubenutzen.
+        game_.reset();
+        setHasSet_ = false;
+        statusLabel_->setText(T("Kein Spiel geladen."));
+        statusLabel_->setStyleSheet("color: #cccccc; font-family: Courier; font-size: 9pt;");
+    }, Qt::QueuedConnection);
     connect(monWorker_, &MonitorWorker::finished, this, &MainWindow::onWorkerFinished);
     connect(monWorker_, &MonitorWorker::finished, monWorker_, &QObject::deleteLater);
 
@@ -1006,9 +1213,9 @@ void MainWindow::onWorkerCoreMissing() {
           "Achievements.\n\n"
           "Das Spiel so starten:\n\n"
           "ueber USB:\n"
-          "  edlink run --file SPIEL.md --fpga mega-core.x25\n\n"
+          "  edlink run --file SPIEL.md --fpga mega-core.x25   (PRO: mega-pro.rbf)\n\n"
           "ueber SD-Karte:\n"
-          "  mega-core.x25 in denselben Ordner wie das ROM legen"));
+          "  mega-core.x25 (CORE) bzw. mega-pro.rbf (PRO) in denselben Ordner wie das ROM legen"));
 }
 
 void MainWindow::onWorkerConnectionLost(const QString& reason) {
@@ -1023,6 +1230,16 @@ void MainWindow::onWorkerConnectionLost(const QString& reason) {
 
 void MainWindow::onWorkerFinished() {
     monWorker_ = nullptr;
+    // Hat sich der Worker selbst beendet (Spiel verlassen, Core fehlt),
+    // laeuft sein Thread noch. Beim Stopp von Hand ist monThread_ hier
+    // schon aufgeraeumt.
+    if (monThread_) {
+        monThread_->quit();
+        QThread* t = monThread_;
+        monThread_ = nullptr;
+        if (t->wait(5000)) t->deleteLater();
+        else { t->setParent(nullptr); connect(t, &QThread::finished, t, &QObject::deleteLater); }
+    }
     if (monitoring_) {
         monitoring_ = false;
         monitorBtn_->setText(T("Verbinden && Monitor starten"));

@@ -37,6 +37,31 @@ constexpr uint32_t kCtrlStatOffset = 0xB009;
 // Der Monitor setzt seinen RAM-Poll aus, solange das Menue offen ist -
 // sonst kollidiert der USB-Zugriff mit dem Menue-Umschalten (Absturz).
 constexpr uint32_t kStatOffset = 0xB001;
+// Ab Mapper-Build 128: Kopierprogramm im Hook (siehe hook_copy.h).
+// E000: Programmspeicher, 1024 Worte, schreib- und ruecklesbar.
+// B00D schreiben: Bit0 = Freigabe. Lesen: Bit1 Freigabe, Bit2 wirksam
+// (uebernimmt der Mapper erst beim naechsten VBlank).
+constexpr uint32_t kCpyOffset    = 0xE000;
+constexpr uint32_t kCpyCtlOffset = 0xB00D;
+// Ab Build 131: Bildpuffer. B00D schreiben Bit1 = Bildpuffer ein (nur
+// zusammen mit Bit0), Bit3-2 = Abschnittsgroesse (1024 >> n); lesen Bit3 =
+// wirksam, Bit5-4 = wirksame Groesse. B002 lesen: Bit7 Programm laeuft
+// gerade, Bit6-0 Zahl der beendeten Laeufe. Lauf g liegt im Spiegel ab
+// (g mod Tiefe) * Abschnittsgroesse. (Build 130 kannte nur 8 x 1 KB und
+// wird nicht mehr benutzt.)
+constexpr uint32_t kRingStatOffset = 0xB002;
+constexpr int      kRingBuild      = 131;
+// Ab Build 133: Kopieren nach dem VBlank-Teil des Spiels. B00D schreiben
+// Bit4 = Nachher-Modus; lesen Bit6 = wirksam, Bit7 = Hauptteil steht aus.
+// B004 lesen: Zaehler "neuer VBlank mitten im Hauptteil" (Abschnitt
+// unvollstaendig).
+constexpr int      kPostBuild      = 133;
+// Ab Build 135: Spiele ohne VBlank-Interrupt. B00D Bit5 = Programm am
+// HBlank-Vektor $70 (hoechstens einmal je 12 ms). D0F7 lesen: Zahl der
+// HBlank-Vektorabrufe (laeuft er, waehrend B00A-B steht, nutzt das Spiel
+// keinen VBlank-Interrupt).
+constexpr int      kHintBuild      = 135;
+constexpr uint32_t kHintCntOffset  = 0xD0F7;
 
 constexpr int kBlockSize  = 64;
 constexpr int kSlotCount  = 128;
@@ -64,6 +89,19 @@ public:
     // true, solange das In-Game-Menue aktiv ist (B001 Bit3). Poll pausiert dann.
     bool menuActive();
     void resetMarks();
+
+    // Kopierprogramm (Mapper ab Build 128)
+    void cpyEnable(bool on, bool ring = false, int rsz = 0, bool post = false, bool hint = false);
+    uint8_t cpyStatus();
+    // Bildpuffer (Build 131): Blockzuordnung fuer die dicht gepackten
+    // Positionen, Zaehlerstand, der Abschnitt eines Laufs.
+    void programRing(int bloecke);
+    uint8_t ringStatus();
+    QByteArray readRing(int lauf, int abschnittBytes, int laenge);
+    void cpyUpload(const QByteArray& programm);
+    QByteArray cpyRead(int laenge);
+    // Rohes Lesen im Mapper-Fenster (Diagnoseregister fuer den Bericht)
+    QByteArray readReg(uint32_t offset, uint32_t laenge);
 
     void clearMap();
     // Blockzuordnung fuer die uebergebenen Adressen schreiben. Wirft

@@ -48,7 +48,15 @@
 // EXIT kehrt ueber CMD_REINIT ins Kassettenmenue zurueck, und unter der
 // Slot-Zeile steht Datum und Uhrzeit des Standes - uebernommen aus dem
 // Zeitstempel der Datei (CMD_F_FINFO), ohne RTC-Abfrage.
-#define MEGA_RAW_CPP_BUILD 27
+// 28: Hardcore-Pruefung ueberarbeitet (setzt Mapper Build 127 voraus).
+// Hardcore-Option ausgeblendet, bis RetroAchievements das Programm freigibt.
+// Tooltip der Hardcore-Option berichtigt, fehlende Uebersetzung ergaenzt.
+// Verlassen des Spiels beendet den Monitor, damit das naechste Spiel
+// wieder startet.
+// 29: Werte werden je Bild vom Kopierprogramm des Mappers gelesen (setzt
+// Mapper Build 135 voraus), Mega EverDrive PRO testweise unterstuetzt,
+// Einrichten legt mega-core.x25 und mega-pro.rbf neben die ROMs.
+#define MEGA_RAW_CPP_BUILD 29
 // 1.0.0: vollstaendiger Durchlauf bis zur gebuchten Freischaltung ist
 // auf echter Hardware belegt (Mortal Kombat, 23.08.2026).
 // 1.1.0: Speicherstaende ueberleben das Ausschalten - sichern und
@@ -57,4 +65,6 @@
 // Datei neben dem ROM, kein Ueberschreiben zwischen Spielen mehr. Menue
 // auf Englisch, mit EXIT zurueck ins Kassettenmenue und Datum/Uhrzeit
 // des Standes (04.09.2026).
-#define MEGA_RAW_VERSION "1.2.1"
+// 1.2.2: Hardcore-Pruefung ueberarbeitet (27.09.2026).
+// 1.3.0: neues Ausleseverfahren, Mega EverDrive PRO testweise (01.11.2026).
+#define MEGA_RAW_VERSION "1.3.0"

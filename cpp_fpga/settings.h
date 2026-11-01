@@ -15,9 +15,10 @@ struct Settings {
     // will, stellt es in den Optionen um - das wirkt sofort.
     QString language = "en"; // "de" oder "en"
     QString rom_root;        // SD-Karte bzw. ROM-Sammlung
-    bool save_login = false; // Benutzer und Sitzungsschluessel merken
+    bool save_login = true;  // Benutzer und Sitzungsschluessel merken (wie RAW-SNES)
     QString user;
     QString token;           // kein Passwort, nur der Sitzungsschluessel
+    long long message_read = 0;  // zuletzt gezeigte Nachricht (nachricht_megaraw.json)
 
     static Settings load(const QString& path = "settings.json");
     void save(const QString& path = "settings.json") const;

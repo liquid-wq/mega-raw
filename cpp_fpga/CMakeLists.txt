@@ -15,6 +15,7 @@ add_executable(mega_raw_gui
     ed_serial_qt.cpp
     monitor_worker.cpp
     md_snoop.cpp
+    hook_copy.cpp
     md_romid.cpp
     md_romread.cpp
     md_romindex.cpp

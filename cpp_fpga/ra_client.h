@@ -35,9 +35,13 @@ public:
 
     // ra_login(user, pw): Token bei Erfolg, sonst leer. Kein Caching.
     std::optional<std::string> ra_login(const std::string& user, const std::string& pw);
+    // Anmeldung mit gespeichertem Schluessel statt Passwort. Token bei Erfolg.
+    std::optional<std::string> ra_login_token(const std::string& user, const std::string& token);
 
     // ra_award(achid, user, token, hardcore): true bei Erfolg, sonst false.
     bool ra_award(long long achid, const std::string& user, const std::string& token, int hardcore = 0);
+    // Antwort des Servers auf die letzte Buchung (einzeilig), fuer das Log.
+    std::string last_award_reply;
 
     // ra_unlocks(gameid, user, token): Menge bereits freigeschalteter IDs.
     // Tolerant gegen Antwortformat (Unlocks/HardcoreUnlocks als Liste von

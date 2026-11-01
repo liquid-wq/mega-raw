@@ -40,6 +40,50 @@ void MdSnoop::resetMarks() {
     ed_.memwr(base_ + kCtlOffset, QByteArray(1, '\0'));
 }
 
+void MdSnoop::cpyEnable(bool on, bool ring, int rsz, bool post, bool hint) {
+    int v = on ? (ring ? 0x03 | ((rsz & 3) << 2) : 0x01) | (post ? 0x10 : 0x00) | (hint ? 0x20 : 0x00) : 0x00;
+    ed_.memwr(base_ + kCpyCtlOffset, QByteArray(1, static_cast<char>(v)));
+}
+
+void MdSnoop::programRing(int bloecke) {
+    // Ziel $1F0000 + Position: der Mapper nimmt Block = Position / 64 als
+    // Index der Zuordnung, also Block k -> Slot k.
+    QByteArray table(kBlockCount, '\0');
+    for (int k = 0; k < bloecke && k < 16; ++k) table[k] = static_cast<char>(0x80 | k);
+    ed_.memwr(base_ + kPmapOffset, table);
+    slots_.clear();
+}
+
+uint8_t MdSnoop::ringStatus() {
+    QByteArray b = ed_.memrd(base_ + kRingStatOffset, 1);
+    if (b.isEmpty()) throw SnoopError("Bildzaehler (B002) nicht lesbar");
+    return static_cast<uint8_t>(b[0]);
+}
+
+QByteArray MdSnoop::readRing(int lauf, int abschnittBytes, int laenge) {
+    const int tiefe = 8192 / abschnittBytes;
+    return ed_.memrd(base_ + kValOffset + static_cast<uint32_t>((lauf % tiefe) * abschnittBytes),
+                     static_cast<uint32_t>(laenge));
+}
+
+uint8_t MdSnoop::cpyStatus() {
+    QByteArray b = ed_.memrd(base_ + kCpyCtlOffset, 1);
+    if (b.isEmpty()) throw SnoopError("Kopierstatus (B00D) nicht lesbar");
+    return static_cast<uint8_t>(b[0]);
+}
+
+void MdSnoop::cpyUpload(const QByteArray& programm) {
+    ed_.memwr(base_ + kCpyOffset, programm);
+}
+
+QByteArray MdSnoop::cpyRead(int laenge) {
+    return ed_.memrd(base_ + kCpyOffset, static_cast<uint32_t>(laenge));
+}
+
+QByteArray MdSnoop::readReg(uint32_t offset, uint32_t laenge) {
+    return ed_.memrd(base_ + offset, laenge);
+}
+
 void MdSnoop::clearMap() {
     ed_.memwr(base_ + kPmapOffset, QByteArray(kBlockCount, '\0'));
     slots_.clear();
