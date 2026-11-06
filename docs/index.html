@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MEGA-RAW — RetroAchievements on Real Mega Drive Hardware via Mega EverDrive</title>
 <meta name="author" content="Liqui">
-<meta name="description" content="MEGA-RAW brings RetroAchievements to real Mega Drive hardware using the Mega EverDrive flash cartridge and a custom FPGA bus-snooper. No emulator, no ROM patch, with its own in-game save state menu. Free to use, hardware-validated.">
+<meta name="description" content="MEGA-RAW brings RetroAchievements to real Mega Drive hardware using the Mega EverDrive flash cartridge and a custom FPGA core. No emulator, no ROM patch, with its own in-game save state menu. Free to use, hardware-validated.">
 <link rel="canonical" href="https://liquid-wq.github.io/mega-raw/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="MEGA-RAW">
@@ -40,7 +40,8 @@
 html{scroll-behavior:smooth}
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
-  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+  /* Die Menue-Karte pulsiert immer, wie die Signalpunkte der Grafik (SVG). */
+  *:not(.card--menu),*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
 }
 body{
   margin:0;background:var(--bg);color:var(--ink);
@@ -159,6 +160,13 @@ h2::before{content:'# ';color:var(--red);font-weight:700}
 .card p{margin:0;color:var(--ink-dim);font-size:14.5px;line-height:1.7}
 .card--hot{border-color:var(--line-hot)}
 .card--hot h3{color:var(--red)}
+/* Menue-Karte: ruhig pulsierender Leuchtrand */
+.card--menu{border-color:var(--red);box-shadow:0 0 0 1px rgba(255,90,60,.5),0 0 18px rgba(255,90,60,.22);animation:menu-glow 3.2s ease-in-out infinite}
+.card--menu h3{text-shadow:0 0 8px rgba(255,90,60,.45)}
+.card--menu{position:relative}
+.menu-rand{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);overflow:visible;pointer-events:none}
+.menu-glanz{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none}
+@keyframes menu-glow{0%,100%{box-shadow:0 0 0 1px rgba(255,90,60,.25),0 0 10px rgba(255,90,60,.10)}50%{box-shadow:0 0 0 1px rgba(255,90,60,.75),0 0 28px rgba(255,90,60,.35)}}
 
 p.body{max-width:64ch;margin:0 0 22px}
 p.body b{color:var(--ink);font-weight:500}
@@ -211,8 +219,8 @@ footer a:hover{border-color:var(--amber)}
     <h1 class="logo">MEGA-RAW<span class="logo__raster" aria-hidden="true">MEGA-RAW</span></h1>
     <p class="lede">
       RetroAchievements on <b>real Mega Drive hardware</b> &mdash; no emulator, no ROM
-      patch. A custom FPGA mapper reads the 68000 bus as the game runs, identifies the
-      cartridge by itself, and <span class="hot">brings its own save state menu
+      patch. A custom FPGA core on the EverDrive identifies the cartridge by itself, and
+      <span class="hot">brings its own save state menu
       along</span>.
     </p>
     <div class="cta-row">
@@ -223,12 +231,12 @@ footer a:hover{border-color:var(--amber)}
 
     <div class="diagram">
       <p class="diagram__title">live signal path &mdash; three lanes, one mapper</p>
-      <svg viewBox="0 0 720 210" role="img" aria-label="Three signal lanes: work RAM snoop, cartridge self-read, and the vertical blank hook, all meeting in the FPGA mapper and leaving over USB to the PC.">
-        <!-- lane 1: snoop -->
-        <text class="lane-label" x="0" y="26">1 · SNOOP</text>
+      <svg viewBox="0 0 720 210" role="img" aria-label="Three lanes: achievement values, cartridge detection and the save state menu, all handled by the FPGA core and passed over USB to the PC.">
+        <!-- lane 1: values -->
+        <text class="lane-label" x="0" y="26">1 · VALUES</text>
         <path class="wire" d="M92 22 H300"/>
         <path class="wire wire--live" d="M300 22 H420"/>
-        <text class="node-label" x="96" y="14">68000 → WORK RAM $FF0000</text>
+        <text class="node-label" x="96" y="14">GAME → ACHIEVEMENT VALUES</text>
         <circle class="dot" cx="92" cy="22" r="2.5"/>
         <circle class="pulse" cx="92" cy="22" r="3">
           <animate attributeName="cx" values="92;420" dur="2.8s" repeatCount="indefinite"/>
@@ -239,18 +247,18 @@ footer a:hover{border-color:var(--amber)}
         <text class="lane-label" x="0" y="78">2 · IDENTIFY</text>
         <path class="wire" d="M92 74 H300"/>
         <path class="wire wire--live" d="M300 74 H420"/>
-        <text class="node-label" x="96" y="66">CARTRIDGE ROM → MD5 IN FPGA</text>
+        <text class="node-label" x="96" y="66">CARTRIDGE → AUTO DETECTION</text>
         <circle class="dot" cx="92" cy="74" r="2.5"/>
         <circle class="pulse" cx="92" cy="74" r="3">
           <animate attributeName="cx" values="92;420" dur="2.8s" begin="0.9s" repeatCount="indefinite"/>
           <animate attributeName="opacity" values="0;1;1;0" dur="2.8s" begin="0.9s" repeatCount="indefinite"/>
         </circle>
 
-        <!-- lane 3: hook -->
-        <text class="lane-label" x="0" y="130">3 · HOOK</text>
+        <!-- lane 3: menu -->
+        <text class="lane-label" x="0" y="130">3 · MENU</text>
         <path class="wire" d="M92 126 H300"/>
         <path class="wire wire--live" d="M300 126 H420"/>
-        <text class="node-label" x="96" y="118">VBLANK → SAVE STATE MENU</text>
+        <text class="node-label" x="96" y="118">START + DOWN → SAVE STATE MENU</text>
         <circle class="dot" cx="92" cy="126" r="2.5"/>
         <circle class="pulse" cx="92" cy="126" r="3">
           <animate attributeName="cx" values="92;420" dur="2.8s" begin="1.8s" repeatCount="indefinite"/>
@@ -281,48 +289,61 @@ footer a:hover{border-color:var(--amber)}
     <h2>What it is</h2>
     <p class="body">
       MEGA-RAW connects a physical Mega Drive, a Mega EverDrive and RetroAchievements.
-      Achievements trigger from the actual console state, read straight off the CPU bus
-      while you play. <b>The game itself is never touched.</b>
+      Achievements trigger from the actual console state while you play. <b>The game itself is never touched.</b>
     </p>
   </section>
 
   <section id="how">
     <h2>How it works</h2>
     <p class="body">
-      A custom FPGA core inside the Mega EverDrive replaces the cartridge mapper. It does
-      three things at once, and the running game notices none of them. Your PC reads the
-      live mirror over USB and evaluates the achievement conditions there. <b>Nothing is
+      A custom FPGA core inside the Mega EverDrive replaces the standard mapper. While you
+      play, it hands the values the achievements need to your PC over USB, and MEGA-RAW
+      checks the conditions there. <b>Nothing is
       written back into the running game.</b>
     </p>
 
     <div class="cards cards--2">
       <div class="card">
-        <h3>Bus-snoop, not ROM-patch</h3>
-        <p>Games run completely unmodified. No IPS file, no injected stub, no per-game hook
-        database to maintain, and no two-megabyte size limit. The mapper mirrors writes to
-        work RAM as the CPU makes them.</p>
+        <h3>No ROM patch</h3>
+        <p>Games run completely unmodified. No IPS file, no per-game database to maintain,
+        and no two-megabyte size limit.</p>
       </div>
       <div class="card">
         <h3>The cartridge names itself</h3>
-        <p>The FPGA reads the ROM on its own, in the idle gaps between 68000 bus cycles, and
-        hashes it while it reads. Sixteen bytes travel over USB instead of two megabytes, so
-        a game is recognised in seconds. Nothing to select, no collection folder to point at.</p>
+        <p>The game is recognised by itself within seconds. Nothing to select, no collection
+        folder to point at.</p>
       </div>
       <div class="card">
-        <h3>Live RAM mirror</h3>
-        <p>The core mirrors the console's work RAM in real time as the CPU writes to it. Only
-        the addresses the achievement set actually needs are mirrored, so the transfer stays
-        small enough to keep up with the game.</p>
+        <h3>Live values</h3>
+        <p>Only the values the achievement set actually needs are passed to the PC, every
+        frame, while the game runs.</p>
       </div>
-      <div class="card card--hot">
+      <div class="card card--hot card--menu">
+        <svg class="menu-rand" aria-hidden="true" focusable="false">
+          <defs><filter id="menu-leuchten" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4"/></filter></defs>
+          <rect x="0" y="0" width="100%" height="100%" fill="none" stroke="#ff5a3c" stroke-width="6" filter="url(#menu-leuchten)">
+            <animate attributeName="stroke-opacity" values=".15;.9;.15" dur="3.2s" repeatCount="indefinite"/>
+          </rect>
+          <rect x="0" y="0" width="100%" height="100%" fill="none" stroke="#ff5a3c" stroke-width="1">
+            <animate attributeName="stroke-opacity" values=".45;1;.45" dur="3.2s" repeatCount="indefinite"/>
+          </rect>
+        </svg>
+        <svg class="menu-glanz" aria-hidden="true" focusable="false">
+          <defs><linearGradient id="menu-streifen" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#ff5a3c" stop-opacity="0"/>
+            <stop offset=".5" stop-color="#ffb454" stop-opacity=".22"/>
+            <stop offset="1" stop-color="#ff5a3c" stop-opacity="0"/>
+          </linearGradient></defs>
+          <rect x="-40%" y="0" width="40%" height="100%" fill="url(#menu-streifen)">
+            <animate attributeName="x" values="-40%;100%;100%" keyTimes="0;.45;1" dur="4.5s" repeatCount="indefinite"/>
+          </rect>
+        </svg>
         <h3>Its own save state menu</h3>
-        <p>Replacing the cartridge mapper normally costs you the EverDrive's in-game menu &mdash;
-        the save state controller is not part of the published sources, so a custom core has
-        nothing to fall back on. MEGA-RAW brings its own along instead. Start + Down opens an
-        overlay over the running game: save, load, continue. The mapper catches the CPU on the
-        next vertical blank and keeps a complete picture of the machine &mdash; work RAM, video
-        RAM, colour RAM, VDP registers, the Z80 and its memory &mdash; then puts it all back
-        exactly as it was.</p>
+        <p>Replacing the cartridge mapper normally costs you the EverDrive's in-game menu.
+        MEGA-RAW brings its own along instead, built from scratch: it
+        saves the complete state of the console and puts it back exactly as it was. Start + Down
+        opens it over the running game: CONTINUE, SAVE, LOAD, EXIT. Four slots per game, stored
+        as files on the SD card, so they survive switching the console off.</p>
       </div>
     </div>
   </section>
@@ -346,8 +367,7 @@ footer a:hover{border-color:var(--amber)}
   <section id="limits">
     <h2>Known limits</h2>
     <p class="body">
-      The same limits apply as to any hardware save state: games without vertical blank
-      interrupts cannot be interrupted, and the sound chips cannot be captured. Some games
+      A few games cannot open the menu, and sound is not part of a save state. Some games
       use the Start button themselves &mdash; if <b>Continue</b> does not react in the menu,
       confirm with <b>C</b> instead.
     </p>
@@ -374,22 +394,20 @@ footer a:hover{border-color:var(--amber)}
   <section id="download">
     <h2>Download</h2>
     <p class="body">
-      Two builds. The FPGA build is the one to use: unpack it and double-click the
-      executable. No Python, no dependencies, nothing to install.
+      One program file. Unpack it and double-click. No installation, no dependencies.
     </p>
     <div class="cards cards--2">
       <div class="card card--hot dl dl--reco">
-        <h3>MEGA-RAW (FPGA) — recommended</h3>
-        <p><b>Unpack, double-click, done.</b> Custom mapper, automatic cartridge detection,
-        in-game save state menu, achievement list with badges, unlock popup, live RAM view,
-        English and German. Nothing is patched.</p>
-        <a href="https://github.com/liquid-wq/mega-raw/releases">Latest release ›</a>
+        <h3>MEGA-RAW 2.0.0 — current</h3>
+        <p><b>Unpack, double-click, done.</b> The FPGA cores for CORE and PRO are built in and
+        set up from inside the program. Automatic cartridge detection, in-game save state menu,
+        achievement list with badges, unlock popup, live RAM view. Seven languages. Nothing is patched.</p>
+        <a href="https://github.com/liquid-wq/mega-raw/releases/latest">Latest release ›</a>
       </div>
       <div class="card dl">
-        <h3>MEGA-RAW (patched)</h3>
-        <p>The original approach. A small routine is patched into the ROM and reports values
-        the PC reads over USB. Over six hundred games are prepared this way. It still works
-        and stays available, but new work goes into the FPGA build.</p>
+        <h3>Older versions</h3>
+        <p>The Qt build (1.x) and the original patched build stay available for reference,
+        but they are no longer maintained. Please use 2.0.0.</p>
         <a href="https://github.com/liquid-wq/mega-raw/releases">All releases ›</a>
       </div>
     </div>
@@ -400,7 +418,7 @@ footer a:hover{border-color:var(--amber)}
     <h2>See it running</h2>
     <p class="body">
       An achievement unlocking as it happens on the console. The condition is evaluated from
-      the live RAM mirror, submitted to RetroAchievements, and the unlock appears on screen.
+      the live values, submitted to RetroAchievements, and the unlock appears on screen.
     </p>
     <figure>
       <img src="megaraw_unlock.gif" alt="An achievement unlocking in MEGA-RAW while Mortal Kombat runs on the console, with the unlock notification sliding in">
@@ -426,7 +444,7 @@ footer a:hover{border-color:var(--amber)}
       source &mdash; see the
       <a href="https://github.com/liquid-wq/mega-raw/blob/main/LICENSE">license</a>.
     </p>
-    <p>There is a NES counterpart too: <a href="https://liquid-wq.github.io/raw-nes/">RAW-NES</a>.</p>
+    <p>There are counterparts for the NES, the Super Nintendo and the Saturn too: <a href="https://liquid-wq.github.io/raw-nes/">RAW-NES</a>, <a href="https://liquid-wq.github.io/raw-snes/">RAW-SNES</a> and <a href="https://liquid-wq.github.io/raw-turn/">RAW-TURN</a>.</p>
     <p>Built by <a href="https://github.com/liquid-wq">Liqui</a>.</p>
   </div>
 </footer>

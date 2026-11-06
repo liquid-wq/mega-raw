@@ -4,8 +4,8 @@
 
 MEGA-RAW connects a physical Mega Drive, a Mega EverDrive CORE and
 RetroAchievements.
-A custom FPGA mapper watches the 68000 bus as the game runs, identifies the
-cartridge by itself, and brings its own in-game save state menu along.
+A custom FPGA core on the EverDrive identifies the cartridge by itself and
+brings its own in-game save state menu along.
 
 **Project page: https://liquid-wq.github.io/mega-raw/**
 
@@ -20,6 +20,21 @@ cartridge by itself, and brings its own in-game save state menu along.
 *Deutsche Fassung weiter unten.*
 
 ---
+
+## What's new in 2.0.0
+
+* **One program file.** No installation, no Qt libraries. The FPGA cores for
+  CORE and PRO are built in and are put onto the SD card from inside the
+  program.
+* **First-run setup.** On the first start MEGA-RAW asks for your language and
+  offers to set up the SD card.
+* **Clear status messages.** If something is missing, MEGA-RAW tells you
+  whether it is the USB cable, the console or the game, and what to do next.
+* **Stops by itself.** If the console is switched off while monitoring, the
+  monitor stops and the achievement list is cleared.
+* **Seven languages:** English, German, Spanish, Portuguese (Brazil), French,
+  Italian, Polish.
+* **Copy log** button for bug reports.
 
 ## Two builds
 
@@ -42,30 +57,24 @@ FPGA build.
 
 ## How it works
 
-Three things happen at the same time, all inside the FPGA:
+A custom FPGA core on the Mega EverDrive takes the place of the standard
+mapper. While you play, it hands the values the achievements need to your PC
+over USB, and MEGA-RAW checks the RetroAchievements conditions there.
 
-- **Work RAM mirror** — writes to the console's work RAM are mirrored into the
-  mapper's own block RAM as the CPU makes them.
-- **Cartridge identification** — the mapper reads the ROM itself in the idle gaps
-  between 68000 bus cycles and hashes it. Sixteen bytes travel over USB instead
-  of two megabytes, so a game is recognised in seconds.
+- **Nothing is patched.** The game runs unmodified, and nothing is written
+  back into it.
+- **Automatic detection.** The cartridge is recognised by itself, no ROM
+  folder and no manual selection needed.
 - **Save state menu** — replacing the cartridge mapper normally costs you the
-  EverDrive's in-game menu: the save state controller is not part of the
-  published sources, so a custom core has nothing to fall back on. MEGA-RAW
-  brings its own along instead. Start + Down opens an overlay over the running
-  game. The mapper catches the CPU on the next vertical blank and keeps a
-  complete picture of the machine — work RAM, video RAM, colour RAM, VDP
-  registers, Z80 and its memory — then puts it all back exactly as it was.
-  Since version 1.1.0 the state is written to the SD card as a file, so it
-  survives switching the console off. Four slots, four files per game.
-
-Your PC reads the live RAM mirror over USB and evaluates the achievement
-conditions there. Nothing is written back into the running game.
+  EverDrive's in-game menu. MEGA-RAW brings its own along instead, built from
+  scratch: it saves the complete state
+  of the console and puts it back exactly as it was. Start + Down opens it over
+  the running game: CONTINUE, SAVE, LOAD, EXIT. Four slots per game, stored as
+  files on the SD card, so they survive switching the console off.
 
 ### Known limits
 
-The same limits apply as to any hardware save state: games without vertical blank
-interrupts cannot be interrupted, and the sound chips cannot be captured.
+A few games cannot open the menu, and sound is not part of a save state.
 
 Some games use the Start button themselves. If **Continue** does not react in the
 menu, confirm with **C** instead.
@@ -84,14 +93,15 @@ menu, confirm with **C** instead.
 
 ## Setup
 
-1. Download the latest release and unpack it.
-2. Start the program and log in with your RetroAchievements account. With
-   **Stay logged in** the program signs you in by itself next time; your
-   password is not stored.
-3. Use **Set up mapper on SD card** and point it at your SD card. The custom
-   cores for both devices (CORE and PRO) are copied to every location the
-   console loads from; each device picks its own file.
-4. Put the card back into the console and start a game.
+1. Download the latest release, unpack it and start `mega-raw.exe`.
+2. The first-run setup asks for your language and offers **Set up mapper on SD
+   card**. Point it at your SD card. The custom cores for both devices (CORE
+   and PRO) are copied to every location the console loads from; each device
+   picks its own file. This can also be done later from the main window.
+3. Log in with your RetroAchievements account. With **Stay logged in** the
+   program signs you in by itself next time; your password is not stored.
+4. Put the card back into the console, connect the EverDrive by USB and start
+   a game.
 5. Press **Connect & start monitor**. The game is detected automatically.
 
 ## Hardcore mode
@@ -118,13 +128,17 @@ Third-party components are listed in
 
 | Folder | Contents |
 |---|---|
-| `cpp_fpga/` | the FPGA build (this is the current one) |
+| `src/`, `assets/` | MEGA-RAW 2.0.0 (current) |
+| `legacy/qt/` | the FPGA build, Qt version 1.x |
 | `legacy/cpp/` | the patched build, C++ port |
 | `legacy/python/` | the patched build, original Python version |
 
 ## Related
 
-There is a NES counterpart: [RAW-NES](https://github.com/liquid-wq/raw-nes).
+There are counterparts for the NES, the Super Nintendo and the Saturn:
+[RAW-NES](https://github.com/liquid-wq/raw-nes),
+[RAW-SNES](https://github.com/liquid-wq/raw-snes) and
+[RAW-TURN](https://github.com/liquid-wq/raw-turn).
 
 Built by [Liqui](https://github.com/liquid-wq).
 
@@ -136,11 +150,25 @@ Built by [Liqui](https://github.com/liquid-wq).
 ROM-Patch.**
 
 MEGA-RAW verbindet ein echtes Mega Drive, ein Mega EverDrive CORE und
-RetroAchievements. Ein eigener FPGA-Mapper liest den 68000-Bus mit, während das
-Spiel läuft, erkennt die Kassette selbst und bringt ein eigenes Ingame-Menü für
-Speicherstände mit.
+RetroAchievements. Ein eigener FPGA-Kern auf dem EverDrive erkennt die Kassette selbst und bringt
+ein eigenes Ingame-Menü für Speicherstände mit.
 
 **Projektseite: https://liquid-wq.github.io/mega-raw/**
+
+## Neu in 2.0.0
+
+* **Eine einzige Programmdatei.** Keine Installation, keine Qt-Bibliotheken.
+  Die FPGA-Kerne für CORE und PRO sind eingebaut und werden aus dem Programm
+  heraus auf die SD-Karte gebracht.
+* **Ersteinrichtung.** Beim ersten Start fragt MEGA-RAW nach der Sprache und
+  bietet an, die SD-Karte einzurichten.
+* **Klare Statusmeldungen.** Fehlt etwas, sagt MEGA-RAW, ob es am USB-Kabel,
+  an der Konsole oder am Spiel liegt und was zu tun ist.
+* **Stoppt von selbst.** Wird die Konsole während der Überwachung
+  ausgeschaltet, stoppt der Monitor und die Achievement-Liste wird geleert.
+* **Sieben Sprachen:** Englisch, Deutsch, Spanisch, Portugiesisch (Brasilien),
+  Französisch, Italienisch, Polnisch.
+* Knopf **Log kopieren** für Fehlermeldungen.
 
 ## Zwei Fassungen
 
@@ -164,34 +192,29 @@ Arbeit fließt aber in die FPGA-Fassung.
 
 ## Wie es funktioniert
 
-Drei Dinge passieren gleichzeitig, alle im FPGA:
+Ein eigener FPGA-Kern auf dem Mega EverDrive ersetzt den Standard-Mapper.
+Während du spielst, gibt er die Werte, die die Achievements brauchen, per USB
+an den PC weiter, und MEGA-RAW prüft dort die Bedingungen von
+RetroAchievements.
 
-- **Work-RAM-Spiegel** — Schreibzugriffe auf das Work-RAM der Konsole werden in
-  den Blockspeicher des Mappers gespiegelt, während die CPU sie ausführt.
-- **Kassettenerkennung** — der Mapper liest das ROM selbst in den Lücken zwischen
-  den 68000-Buszyklen und bildet den Hash. Über USB gehen sechzehn Byte statt
-  zwei Megabyte, ein Spiel ist damit in Sekunden erkannt.
+- **Nichts wird gepatcht.** Das Spiel läuft unverändert, und es wird nichts
+  hineingeschrieben.
+- **Automatische Erkennung.** Die Kassette wird von selbst erkannt, kein
+  ROM-Ordner und keine Auswahl von Hand nötig.
 - **Speicherstand-Menü** — wer den Kassetten-Mapper ersetzt, verliert damit
-  normalerweise das Ingame-Menü des EverDrive: Der Savestate-Controller gehört
-  nicht zu den veröffentlichten Quellen, ein eigener Kern hat also nichts, worauf
-  er zurückgreifen könnte. MEGA-RAW bringt deshalb ein eigenes mit. Start + Runter
-  öffnet ein Overlay über dem laufenden Spiel. Der Mapper fängt die CPU beim
-  nächsten Bildrücklauf, sichert den vollständigen Zustand — Work-RAM,
-  Bildspeicher, Farbspeicher, VDP-Register, Z80 samt Speicher — und stellt ihn
-  danach exakt wieder her. Seit Fassung 1.1.0 landet der Stand als Datei auf
-  der SD-Karte und überlebt damit das Ausschalten. Vier Slots, vier Dateien
-  je Spiel.
-
-Der PC liest den Spiegel über USB und wertet die Achievement-Bedingungen dort
-aus. In das laufende Spiel wird nichts zurückgeschrieben.
+  normalerweise das Ingame-Menü des EverDrive. MEGA-RAW bringt deshalb ein
+  eigenes mit, komplett
+  selbst gebaut: Es sichert den vollständigen Zustand der Konsole und stellt ihn
+  exakt wieder her. Start + Runter öffnet es über dem laufenden Spiel: CONTINUE,
+  SAVE, LOAD, EXIT. Vier Slots je Spiel, als Dateien auf der SD-Karte, sie
+  überleben also das Ausschalten.
 
 ### Bekannte Einschränkungen
 
-Es gelten dieselben Grenzen wie bei jedem Hardware-Speicherstand: Spiele ohne
-Bildrücklauf-Interrupt lassen sich nicht anhalten, und die Klangbausteine lassen
-sich nicht sichern.
+Bei einigen wenigen Spielen lässt sich das Menü nicht öffnen, und der Ton ist
+nicht Teil eines Speicherstands.
 
-Manche Spiele belegen die Start-Taste selbst. Reagiert **WEITER** im Menü nicht,
+Manche Spiele belegen die Start-Taste selbst. Reagiert **CONTINUE** im Menü nicht,
 stattdessen mit **C** bestätigen.
 
 ## Voraussetzungen
@@ -208,14 +231,17 @@ stattdessen mit **C** bestätigen.
 
 ## Einrichtung
 
-1. Die aktuelle Fassung herunterladen und entpacken.
-2. Programm starten und mit dem RetroAchievements-Konto anmelden. Mit
-   **Eingeloggt bleiben** meldet sich das Programm beim nächsten Start selbst
-   an; das Passwort wird nicht gespeichert.
-3. **Mapper auf SD-Karte einrichten** wählen und die SD-Karte angeben. Die
-   eigenen Kerne für beide Geräte (CORE und PRO) werden an alle Stellen
-   kopiert, von denen die Konsole lädt; jedes Gerät nimmt seine eigene Datei.
-4. Karte zurück in die Konsole stecken und ein Spiel starten.
+1. Die aktuelle Fassung herunterladen, entpacken und `mega-raw.exe` starten.
+2. Die Ersteinrichtung fragt nach der Sprache und bietet **Mapper auf SD-Karte
+   einrichten** an. Dort die SD-Karte angeben. Die eigenen Kerne für beide
+   Geräte (CORE und PRO) werden an alle Stellen kopiert, von denen die Konsole
+   lädt; jedes Gerät nimmt seine eigene Datei. Das geht auch später im
+   Hauptfenster.
+3. Mit dem RetroAchievements-Konto anmelden. Mit **Eingeloggt bleiben** meldet
+   sich das Programm beim nächsten Start selbst an; das Passwort wird nicht
+   gespeichert.
+4. Karte zurück in die Konsole stecken, das EverDrive per USB verbinden und ein
+   Spiel starten.
 5. **Verbinden & Monitor starten** drücken. Das Spiel wird automatisch erkannt.
 
 ## Hardcore-Modus
@@ -238,8 +264,11 @@ prüfbar, aber nicht Open Source — siehe [LICENSE](LICENSE).
 Fremde Bestandteile sind in
 [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) aufgeführt.
 
-## Verwandtes Projekt
+## Verwandte Projekte
 
-Für den NES gibt es das Gegenstück: [RAW-NES](https://github.com/liquid-wq/raw-nes).
+Gegenstücke gibt es für NES, Super Nintendo und Saturn:
+[RAW-NES](https://github.com/liquid-wq/raw-nes),
+[RAW-SNES](https://github.com/liquid-wq/raw-snes) und
+[RAW-TURN](https://github.com/liquid-wq/raw-turn).
 
 Gebaut von [Liqui](https://github.com/liquid-wq).
