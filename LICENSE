@@ -1,18 +1,17 @@
-MEGA-RAW — License, version 3, effective 6 November 2026
+MEGA-RAW — License, version 4, effective 26 November 2026
 Copyright (c) 2025-2026 Liqui (github.com/liquid-wq). All rights reserved.
 Releases published before this date carry the license text shipped with them.
 
-The source code of MEGA-RAW is published so that it can be read, audited and
-learned from. It is NOT free software and NOT open source. Publication grants
-no right to pass the code on, or to build anything from it that other people
-receive.
+The source code of MEGA-RAW is published so that it can be read and audited,
+to make sure that it contains no malware. It is NOT free software and NOT open
+source. Publication grants no right to pass the code on, or to build anything
+from it that other people receive.
 
 PERMITTED
   1. Use the compiled program, privately or commercially.
   2. Read and study the source code.
   3. Modify the source code for your own private use.
-  4. Quote short excerpts for teaching, reviews or bug reports, with
-     attribution.
+  4. Quote short excerpts for reviews or bug reports, with attribution.
   5. Link to this repository and to its releases.
 
 NOT PERMITTED WITHOUT PRIOR WRITTEN PERMISSION

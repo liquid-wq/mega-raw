@@ -87,6 +87,8 @@ public:
     Bytes cpyRead(int laenge);
     // Rohes Lesen im Mapper-Fenster (Diagnoseregister fuer den Bericht)
     Bytes readReg(uint32_t offset, uint32_t laenge);
+    // Rohes Schreiben im Mapper-Fenster
+    void schreibeReg(uint32_t offset, const Bytes& daten) { ed_.memwr(base_ + offset, daten); }
 
     void clearMap();
     // Wirft SnoopError, wenn mehr als kSlotCount verschiedene Bloecke noetig sind.

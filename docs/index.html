@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MEGA-RAW — RetroAchievements on Real Mega Drive Hardware via Mega EverDrive</title>
 <meta name="author" content="Liqui">
-<meta name="description" content="MEGA-RAW brings RetroAchievements to real Mega Drive hardware using the Mega EverDrive flash cartridge and a custom FPGA core. No emulator, no ROM patch, with its own in-game save state menu. Free to use, hardware-validated.">
+<meta name="description" content="MEGA-RAW brings RetroAchievements to the original Mega Drive console. The game runs on the real console, the Mega EverDrive simply takes the place of the cartridge. No emulator, no ROM patch. Achievements pop up on your TV, with its own in-game save state menu.">
 <link rel="canonical" href="https://liquid-wq.github.io/mega-raw/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="MEGA-RAW">
@@ -314,9 +314,11 @@ footer a:hover{border-color:var(--amber)}
         folder to point at.</p>
       </div>
       <div class="card">
-        <h3>Live values</h3>
-        <p>Only the values the achievement set actually needs are passed to the PC, every
-        frame, while the game runs.</p>
+        <h3>Achievements right in the game</h3>
+        <p>No more looking at the PC while you play. When you unlock an achievement, a banner
+        with its title flies in on the console's own picture. The game holds for about three seconds and carries on by itself. It waits
+        for a calm moment, so it does not cut into a jump. If you'd rather not have it, you can turn
+        it off in the options.</p>
       </div>
       <div class="card card--hot card--menu">
         <svg class="menu-rand" aria-hidden="true" focusable="false">
@@ -367,7 +369,8 @@ footer a:hover{border-color:var(--amber)}
   <section id="limits">
     <h2>Known limits</h2>
     <p class="body">
-      A few games cannot open the menu, and sound is not part of a save state. Some games
+      A few games cannot open the menu or show the popup; achievements still work there.
+      Sound is not part of a save state. Some games
       use the Start button themselves &mdash; if <b>Continue</b> does not react in the menu,
       confirm with <b>C</b> instead.
     </p>
@@ -376,7 +379,7 @@ footer a:hover{border-color:var(--amber)}
   <section id="requirements">
     <h2>Requirements</h2>
     <dl class="spec">
-      <div><dt>Cartridge</dt><dd>Mega EverDrive CORE (tested) &middot; PRO (experimental, no in-game menu yet)</dd></div>
+      <div><dt>Cartridge</dt><dd>Mega EverDrive CORE (tested) &middot; PRO (experimental, no in-game menu or popup yet)</dd></div>
       <div><dt>Console</dt><dd>Original Mega Drive / Genesis hardware</dd></div>
       <div><dt>Connection</dt><dd>USB (EverDrive ↔ PC)</dd></div>
       <div><dt>Platform</dt><dd>Windows</dd></div>
@@ -385,7 +388,7 @@ footer a:hover{border-color:var(--amber)}
     <p class="body" style="margin-top:20px;font-size:14.5px;color:var(--ink-dim)">
       Development and testing happen on the Mega EverDrive CORE. The PRO is supported
       experimentally since 1.3.0: achievements work there according to tester feedback,
-      the in-game menu does not work on the PRO yet. Feedback is welcome as a
+      the in-game menu and the popup are not available on the PRO yet. Feedback is welcome as a
       <a href="https://github.com/liquid-wq/mega-raw/issues">GitHub Issue</a>.
       Other models are untested.
     </p>
@@ -398,16 +401,16 @@ footer a:hover{border-color:var(--amber)}
     </p>
     <div class="cards cards--2">
       <div class="card card--hot dl dl--reco">
-        <h3>MEGA-RAW 2.0.0 — current</h3>
-        <p><b>Unpack, double-click, done.</b> The FPGA cores for CORE and PRO are built in and
-        set up from inside the program. Automatic cartridge detection, in-game save state menu,
-        achievement list with badges, unlock popup, live RAM view. Seven languages. Nothing is patched.</p>
+        <h3>MEGA-RAW 2.1.0 — current</h3>
+        <p><b>Unpack, double-click, done.</b> Achievements pop up on your TV. The SD card is set
+        up over USB and stays in the EverDrive. Start a game and monitoring begins by itself.
+        In-game save state menu, achievement list with badges, seven languages. Nothing is patched.</p>
         <a href="https://github.com/liquid-wq/mega-raw/releases/latest">Latest release ›</a>
       </div>
       <div class="card dl">
         <h3>Older versions</h3>
         <p>The Qt build (1.x) and the original patched build stay available for reference,
-        but they are no longer maintained. Please use 2.0.0.</p>
+        but they are no longer maintained. Please use 2.1.0.</p>
         <a href="https://github.com/liquid-wq/mega-raw/releases">All releases ›</a>
       </div>
     </div>
@@ -417,6 +420,14 @@ footer a:hover{border-color:var(--amber)}
   <section id="running">
     <h2>See it running</h2>
     <p class="body">
+      An achievement popping up on the console's own picture, while the game holds for a moment.
+    </p>
+    <figure>
+      <img src="megaraw_popup.gif" alt="An achievement banner flying in on the TV picture while Streets of Rage runs on the console">
+      <figcaption>Streets of Rage on real hardware &mdash; the popup on the TV</figcaption>
+    </figure>
+
+    <p class="body" style="margin-top:44px">
       An achievement unlocking as it happens on the console. The condition is evaluated from
       the live values, submitted to RetroAchievements, and the unlock appears on screen.
     </p>

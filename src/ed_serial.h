@@ -30,10 +30,35 @@ public:
 
     Bytes memrd(uint32_t addr, uint32_t length);
     void memwr(uint32_t addr, const Bytes& data);
+    // Ohne Wiederverbinden (kein Durchsuchen fremder Anschluesse)
+    Bytes memrdNoRecover(uint32_t addr, uint32_t length) { return memrdRaw(addr, length); }
+    // Systeminfo (CMD_SYS_INF 0x26, 64 Byte) wie RAW-NES; leer ohne Antwort.
+    Bytes sysInfoNoRecover();
+    // Anschluss schliessen und neu oeffnen (kein Durchsuchen fremder Anschluesse)
+    bool neuOeffnen();
 
     const std::string& portName() const { return portname_; }
 
+    // Dateizugriff auf die SD-Karte ueber die MCU des EverDrive (Befehle aus
+    // Krikzz' edio/everdrive.c). Zahlen wie bei memrd big-endian.
+    // Rueckgabe: 0 ok, >0 Fehlercode der Karte (FatFs), <0 keine/falsche Antwort.
+    struct Eintrag {
+        std::string name;
+        uint32_t groesse = 0;
+        bool ordner = false;
+    };
+    int ordnerListe(const std::string& pfad, std::vector<Eintrag>& aus, int maxEintraege = 4000);
+    int ordnerAnlegen(const std::string& pfad);
+    int loeschen(const std::string& pfad);
+    int dateiInfo(const std::string& pfad, Eintrag& aus);
+    int dateiSchreiben(const std::string& pfad, const Bytes& daten);
+    int dateiLesen(const std::string& pfad, uint32_t groesse, Bytes& aus);
+    // Pfad des zuletzt gestarteten ROMs (CMD_ROM_PATH 0x31, Firmware ab v24)
+    int romPfad(std::string& aus);
+
 private:
+    int statusRaw();
+    bool liesEintrag(Eintrag& e);
     Bytes readUpTo(int maxLen, int timeoutMs);
     bool write(const Bytes& data);
     void clearInput();
@@ -61,5 +86,8 @@ std::vector<SerialPortInfo> availableSerialPorts();
 // USB-Geraete (mit Herstellerkennung, kein Bluetooth), zuletzt der Rest.
 // {nullptr, ""}, wenn keiner antwortet. versuche: je erfolglosem Anschluss
 // "COMx: Grund" (fuer das Protokoll).
+// Wird vor jedem find_everdrive aufgerufen (die Oberflaeche schliesst dort
+// ihre eigene Leerlauf-Verbindung, damit der Anschluss frei ist).
+extern void (*g_vorFindEverdrive)();
 std::pair<std::unique_ptr<EdSerial>, std::string> find_everdrive(const std::string& preferred = std::string(),
                                                                   std::vector<std::string>* versuche = nullptr);

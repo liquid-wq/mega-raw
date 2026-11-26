@@ -1,4 +1,5 @@
 #include "hook_copy.h"
+#include "zusatz.h"
 
 #include <algorithm>
 #include <map>
@@ -278,10 +279,12 @@ static void erzeugeWRing(Programm& p, const std::vector<uint32_t>& offs) {
     p.groesse  = best.groesse;
     p.pruefPos = best.groesse - 6;
     p.spPos    = best.groesse - 4;
+    zusatz::abschnitt(p);
     // Stapelzeiger des Spiels festhalten, BEVOR Register gesichert werden -
     // zeigt, ob unser Sichern in ueberwachte Adressen reicht.
     p.worte.push_back(0x23CF);                          // move.l a7,(abs).l
     lang(p.worte, kZielBasis | p.spPos);
+    zusatz::eintritt(p);
 
     p.worte.push_back(0x48E7);                          // movem.l ...,-(sp)
     p.worte.push_back(best.bloecke ? 0xFFFE : 0x00C0);  // d0-d7/a0-a6 bzw. a0/a1
@@ -289,6 +292,12 @@ static void erzeugeWRing(Programm& p, const std::vector<uint32_t>& offs) {
     lang(p.worte, 0xFF8000);
     p.worte.push_back(0x43F9);                          // lea $1F0000,a1
     lang(p.worte, kZielBasis);
+    // Pruefwert zuerst loeschen: liest der PC den Abschnitt mitten im Lauf,
+    // fehlt A55A und das Bild wird verworfen. move statt clr (clr liest vorher).
+    p.worte.push_back(0x337C);                          // move.w #0,d16(a1)
+    p.worte.push_back(0x0000);
+    p.worte.push_back(static_cast<uint16_t>(p.pruefPos));
+    p.takte += 16;
     for (const Teil& teil : best.teile) {
         if (teil.block) {
             // Zielposition des Blockanfangs: aus einem belegten Byte im Block
@@ -330,13 +339,14 @@ static void erzeugeWRing(Programm& p, const std::vector<uint32_t>& offs) {
             }
         }
     }
+    zusatz::hauptteil(p, best.bloecke ? 60 : 8);
     p.worte.push_back(0x337C);                          // move.w #imm,d16(a1)
     p.worte.push_back(kPruefwert);
     p.worte.push_back(static_cast<uint16_t>(p.pruefPos));
     p.worte.push_back(0x4CDF);                          // movem.l (sp)+,...
     p.worte.push_back(best.bloecke ? 0x7FFF : 0x0300);
     p.takte += best.takte;                              // ggf. zum Vorspann dazu
-    p.stapel = best.bloecke ? 60 : 8;                   // gesicherte Register in Byte
+    p.stapel = (best.bloecke ? 60 : 8) + p.stapelZusatz;   // gesicherte Register in Byte
     waehleAbschnitt(p);
 }
 
@@ -347,6 +357,7 @@ static void erzeugeWRing(Programm& p, const std::vector<uint32_t>& offs) {
 // auch bei einem Spiel im Usermodus im Supervisormodus laeuft; die
 // Interruptmaske bleibt die des Spiels (HBlank-Effekte laufen weiter).
 static void vorspann(Programm& p) {
+    zusatz::vorspann(p);
     p.worte.push_back(0x4879);                          // pea ($3FF020).l
     lang(p.worte, 0x3FF000 + 2 * kPostWort);
     p.worte.push_back(0x3F2F);                          // move.w 4(a7),-(a7)
@@ -359,13 +370,15 @@ static void vorspann(Programm& p) {
     p.takte += 20 + 18 + 16 + 12;
 }
 
-Programm erzeuge(Weg weg, const std::vector<uint32_t>& adressen, bool ring, bool post, bool hint) {
+Programm erzeuge(Weg weg, const std::vector<uint32_t>& adressen, bool ring, bool post, bool hint, bool mitZusatz,
+                  bool bank2) {
     Programm p;
     std::vector<uint32_t> offs = offsets(adressen);
     if (offs.empty()) throw HookCopyError("keine Adressen");
     p.ring = ring;
     p.post = post && !hint;
     p.hint = hint;
+    zusatz::beginn(p, mitZusatz, weg == Weg::W, bank2);
     if (p.post) vorspann(p);
     if (!ring) {
         p.pruefOff = pruefstelle(offs);
@@ -377,6 +390,7 @@ Programm erzeuge(Weg weg, const std::vector<uint32_t>& adressen, bool ring, bool
         waehleAbschnitt(p);
         erzeugeR(p, offs);
     }
+    zusatz::anhang(p);
     if (hint) {
         // HBlank-Betrieb (Mapper ab Build 135): echten HBlank-Handler auf den
         // Stapel, Lauf beenden, per rts dorthin. Der Mapper liefert die
@@ -403,6 +417,7 @@ Programm erzeuge(Weg weg, const std::vector<uint32_t>& adressen, bool ring, bool
     }
     if (static_cast<int>(p.worte.size()) > kMaxWorte)
         throw HookCopyError("Programm zu gross");
+    zusatz::abschluss(p);
     return p;
 }
 

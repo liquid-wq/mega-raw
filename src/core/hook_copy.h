@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -19,6 +20,8 @@
 // Am Ende steht ein Pruefwert (A55A) an einer freien Stelle im Spiegel,
 // danach jmp $3FFF00. Die Ausgabe ist byteweise gleich mit dem
 // Python-Generator, der jede Zeile per Disassembler prueft.
+
+namespace zusatz { struct Info; }
 
 namespace hookcopy {
 
@@ -61,10 +64,16 @@ struct Programm {
     uint32_t pruefPos = 0;      // Position des Pruefwerts (gerade)
     uint32_t spPos    = 0;      // Weg W: Stapelzeiger beim Eintritt (Langwort), 0 = keiner
     int      stapel   = 0;      // Byte, die das Programm unter den Stapelzeiger schreibt
+    int      stapelZusatz = 0;  // davon zusaetzlich durch Erweiterungen
     uint32_t groesse  = 0;      // belegte Bytes je Abschnitt
     int      rsz      = 0;      // Abschnittsgroesse fuer B00D Bit 3-2
     int      abschnitt = 0;     // Bytes je Abschnitt
     int      tiefe    = 0;      // Bilder im Ring
+    // Zweite Haelfte des Programmspeichers (Mapper ab Build 137, Worte
+    // 1024-2047), leer = unbenutzt
+    std::vector<uint16_t> worte2;
+    // Erweiterungen (zusatz.h), leer = keine
+    std::shared_ptr<zusatz::Info> zusatz;
 };
 
 class HookCopyError : public std::runtime_error {
@@ -79,8 +88,9 @@ std::vector<uint32_t> offsets(const std::vector<uint32_t>& adressen);
 std::vector<int> bloecke(const std::vector<uint32_t>& offs);
 uint32_t pruefstelle(const std::vector<uint32_t>& offs);
 
+// zusatz/bank2: Erweiterungen einbauen (nur Weg W, Bildpuffer, Nachher-Modus)
 Programm erzeuge(Weg weg, const std::vector<uint32_t>& adressen, bool ring = false, bool post = false,
-                  bool hint = false);
+                  bool hint = false, bool zusatz = false, bool bank2 = false);
 
 // Programm als Bytefolge (hoeherwertiges Byte zuerst) zum Hochladen
 std::vector<uint8_t> bytes(const Programm& p);

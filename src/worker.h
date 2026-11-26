@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -22,6 +23,7 @@
 #include "md_snoop.h"
 #include "ra_client.h"
 #include "ra_engine.h"
+#include "zusatz.h"
 
 // Ersatz fuer QElapsedTimer.
 class Uhr {
@@ -40,7 +42,7 @@ private:
 class MonitorWorker {
 public:
     MonitorWorker(std::string port, Game game, std::string user, std::string token,
-                  std::shared_ptr<RaClient> client, bool hardcore = false);
+                  std::shared_ptr<RaClient> client, bool hardcore = false, bool popupImSpiel = true);
     ~MonitorWorker();
 
     // Startet den eigenen Thread (QThread::started -> start()).
@@ -59,6 +61,11 @@ public:
         writeSessionMarker(g);
     }
 
+    // Nur Test (test.ini popuptest=1): Einblendung von Hand ausloesen, mit
+    // dem Titel eines zufaelligen Achievements aus dem geladenen Set.
+    bool popupTestErlaubt() const { return popupTestErlaubt_; }
+    void popupTest() { popupTestWunsch_ = true; }
+
     // --- Rueckrufe (im Worker-Thread) ---
     // Logzeile in beiden Sprachen (Anzeige folgt dem Sprachwechsel).
     std::function<void(const Zweisprachig&)> log;
@@ -76,6 +83,7 @@ private:
     void emitLog(const Zweisprachig& m);
 
     void writeSessionMarker(const Game& g);
+    void popupGrundMelden(const hookcopy::Programm& p, const std::string& name);
     void richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<uint32_t>& addrs, bool zuordnungOk);
     bool altWegErlaubt() const { return coreBuild_ < 132 || plattform_ == 1; }
     int plattform_ = -1;         // 1 CORE, 2 PRO, 0 unbekannt, -1 nicht gelesen
@@ -106,6 +114,12 @@ private:
     uint32_t spRuhe_ = 0;
     int diagBusy_ = 0;
     int postZwang_ = -1;
+    // Erweiterungen des Kopierprogramms (zusatz.h)
+    std::unique_ptr<zusatz::Steuerung> zusatz_;
+    bool popupImSpiel_ = true;   // Einstellung: Einblendung im Spiel
+    bool popupTestErlaubt_ = false;
+    std::atomic<bool> popupTestWunsch_{false};
+    Uhr popupAutoUhr_;
     Uhr wechselUhr_;
     int ringAbschnitt_ = 1024;
     int ringTiefe_ = 8;

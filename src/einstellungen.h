@@ -3,6 +3,7 @@
 // unveraendert weiterbenutzt.
 #pragma once
 
+#include <map>
 #include <string>
 
 struct Settings {
@@ -15,6 +16,9 @@ struct Settings {
     std::string user;
     std::string token;           // kein Passwort, nur der Sitzungsschluessel
     long long message_read = 0;  // zuletzt gezeigte Nachricht (nachricht_megaraw.json)
+    bool popup_in_game = true;   // Achievement-Einblendung im Spiel
+    // Erkennung ueber die SD-Karte: "Pfad|Groesse" -> MD5 (einmal gelesen)
+    std::map<std::string, std::string> md5_cache;
 
     static Settings load(const std::string& path);
     void save(const std::string& path) const;

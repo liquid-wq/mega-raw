@@ -69,8 +69,21 @@ private:
     // ---------------- Ablaeufe (MainWindow-Slots) ----------------
     void onChooseRom();
     void onSetupMapper();
+    // Einrichtung ohne Laufwerk: ueber USB, nur im EverDrive-Menue.
+    void einrichtenUsbSuchen(std::vector<uint8_t> core);
+    void einrichtenUsbSchreiben(std::vector<std::string> ziele, std::vector<uint8_t> core);
+    void onSetupMapperLaufwerk(std::vector<uint8_t> src);
+    std::atomic<bool> usbEinrichtungLaeuft_{false};
+    // Fortschritt fuer das Warte-Fenster: Ordner gelesen bzw. geschrieben (von gesamt)
+    std::atomic<int> usbZaehler_{0}, usbGesamt_{0};
+    bool usbWarAktiv_ = false;
+    long long usbSeitMs_ = 0;
+    void ZeichneWarten();
     void setupMapperIn(const std::string& root, const std::vector<uint8_t>& src);
-    void onRestoreMappers();
+    void onRestoreMappers();          // zuerst ueber USB, sonst Laufwerk
+    void onRestoreMappersLaufwerk();
+    void wiederherstellenUsbSchreiben(std::vector<std::pair<std::string, uint32_t>> gesichert,
+                                      std::vector<std::string> eigene);
     void restoreIn(const std::string& root);
     void onLogin();
     void onLogout();
@@ -102,7 +115,8 @@ private:
 
     // ---------------- Dialoge (QMessageBox, QDialog) ----------------
     struct Dialog {
-        enum class Art { Info, Warnung, Frage, Optionen, Kofi, Katze, Nachricht, Ersteinrichtung, };
+        enum class Art { Info, Warnung, Frage, Optionen, Kofi, Katze, Nachricht, Ersteinrichtung, Bestaetigen, };
+        std::vector<std::string> liste;   // Bestaetigen: Zeilen in einem Rollbereich
         int schritt = 0;         // Ersteinrichtung: 0 Sprache, 1 SD-Karte
         Art art = Art::Info;
         std::string titel, text;
@@ -112,10 +126,14 @@ private:
         int nummer = 0;
         bool geoeffnet = false;
         std::string sprache;     // Optionen: gewaehlte Sprache (Kennung)
+        bool popupImSpiel = true;   // Optionen: Achievement-Einblendung im Spiel
     };
     void Info(const std::string& titel, const std::string& text, std::function<void()> ok = nullptr);
     void Warnung(const std::string& titel, const std::string& text);
     void Frage(const std::string& titel, const std::string& text, std::function<void()> ja);
+    // OK/Abbrechen mit Liste (Einrichtung ueber USB): nichts ohne OK.
+    void Bestaetigen(const std::string& titel, const std::string& text, std::vector<std::string> liste,
+                     std::function<void()> ok);
     void ZeichneDialog();
     // Nachricht an die Nutzer: data/nachricht_megaraw.json auf der Seite,
     // jede id nur einmal (settings.json "message_read").
@@ -209,7 +227,26 @@ private:
     bool logAmEnde_ = true;
     bool erkennungErklaert_ = false;  // detectGame hat den Grund schon ins Log geschrieben
     bool verbindungWeg_ = false;     // Monitor endete wegen Verbindungsverlust
+    // Automatischer Start (wie RAW-NES): ohne Monitor alle 3 s nachsehen
+    int leerlauf_ = 0;               // 0 kein EverDrive, 1 EverDrive-Menue, 2 Spiel laeuft, 3 Konsole aus
+    bool autoPause_ = false;         // nach Stopp von Hand / Spiel ohne Set: erst beim naechsten Spiel wieder
+    std::atomic<bool> probeLaeuft_{false};
+    long long naechsteProbeMs_ = 0, spielSeitMs_ = 0;
+    long long kernSeitMs_ = 0;       // seit wann unser Kern gemeldet wird
+    int letzterZaehler_ = -1;       // Bildzaehler (VBlank<<8 | HBlank) der letzten Abfrage
+    void autoStartPruefen();
+    void AnschlussBelegt(const char* titel);   // EverDrive steckt, antwortet aber nicht
+    void autoZustand(int zustand, int zaehler);
+    // Erkennung ueber die SD-Karte: 0 frei, 1 laeuft, 2 MD5 bereit, 3 gescheitert (Mapper)
+    int sdErk_ = 0;
+    std::string sdMd5_;
+    void sdErkennungStarten();
     double logKopiertZeit_ = 0;      // "Kopiert!" fuer 2 s
+    // Nur Test (test.ini sdtest=1): Dateizugriff ueber USB messen
+    int sdTestErlaubt_ = -1;         // -1 noch nicht gelesen
+    std::atomic<bool> sdTestLaeuft_{false};
+    void sdTestUsb();
+    void sdAufraeumenUsb();          // Testknopf: Altlasten der Entwicklerkarte entfernen
     size_t logZeilenGezeichnet_ = 0;
 
     bilder::Textur jason_;

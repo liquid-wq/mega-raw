@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include "archiv.h"
+#include "eigene_kerne.h"
 #include "erzeugt_katze.h"
 #include "i18n.h"
 #include "md5.h"
@@ -17,6 +18,7 @@
 #include <mmsystem.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -37,6 +39,14 @@ constexpr bool kHardcoreAktiv = false;
 // Ordnername der Sicherung. Liegt in dem Wurzelverzeichnis, das beim
 // Einrichten gewaehlt wurde, damit Sicherung und Karte zusammenbleiben.
 const char* kBackupDir = "MEGA-RAW_ORIG_BACKUP";
+
+// Stammt eine Kerndatei dieser Groesse von MEGA-RAW (alte oder aktuelle Fassung)?
+// Solche Dateien sind keine Originale: nicht sichern, nicht zurueckschreiben.
+bool UsbEigenerKern(uint64_t groesse, const std::vector<size_t>& aktuell) {
+    for (size_t g : aktuell) if (g != 0 && g == groesse) return true;
+    for (uint32_t g : kEigeneKernGroessen) if (g == groesse) return true;
+    return false;
+}
 
 constexpr int kCoreRessource = 100;    // mega-core.x25, siehe app.rc.in
 constexpr int kProRessource = 101;     // mega-pro.rbf
@@ -315,11 +325,56 @@ void App::NachrichtHolen() {
     });
 }
 
+// Nur Testbau (test.ini neben der Exe): Zeile sofort nach test_log.txt
+static void TestLogZeile(const std::string& text) {
+    static const bool testLog = [] {
+        std::error_code ec;
+        return fs::exists(fs::u8path(plattform::ExeOrdner() + "/test.ini"), ec);
+    }();
+    if (!testLog) return;
+    static std::mutex m;
+    std::lock_guard<std::mutex> l(m);
+    static std::ofstream f(fs::u8path(plattform::ExeOrdner() + "/test_log.txt"), std::ios::app);
+    const auto t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    char zeit[16] = {};
+    std::strftime(zeit, sizeof(zeit), "%H:%M:%S ", std::localtime(&t));
+    f << zeit << text << "\n";
+    f.flush();
+}
+
 void App::appendLog(const Zweisprachig& line) {
     std::lock_guard<std::mutex> l(logMutex_);
     log_.push_back(line);
     if (log_.size() > 20000) log_.pop_front();
+    TestLogZeile(line.text());
 }
+
+// Leerlauf-Verbindung des automatischen Starts: bleibt offen (wie RAW-NES),
+// statt alle 3 s neu geoeffnet zu werden. Vor jedem anderen Zugriff auf den
+// Anschluss (find_everdrive) wird sie geschlossen.
+namespace {
+struct LeerlaufVerbindung {
+    std::mutex m;
+    std::unique_ptr<EdSerial> ed;
+};
+LeerlaufVerbindung& Leerlauf() { static LeerlaufVerbindung l; return l; }
+// Steckt ein Mega EverDrive am USB (Kennung 38DF:0018)? Dann darf die
+// Einrichtung nicht still auf das Laufwerk ausweichen, wenn er nicht antwortet.
+bool EverDriveAmUsb() {
+    for (const auto& p : availableSerialPorts())
+        if (p.hatKennung && p.vid == 0x38DF && p.pid == 0x0018) return true;
+    return false;
+}
+std::string LHx(int v) { char t[8]; std::snprintf(t, sizeof(t), "%02x", v & 0xFF); return t; }
+void LeerlaufSchliessen() {
+    std::lock_guard<std::mutex> g(Leerlauf().m);
+    if (Leerlauf().ed) {
+        Leerlauf().ed->close();
+        Leerlauf().ed.reset();
+        TestLogZeile("LEERLAUF: Anschluss freigegeben");
+    }
+}
+}  // namespace
 
 // ============================================================================
 // Achievement-Liste
@@ -536,8 +591,15 @@ std::vector<uint8_t> App::proDaten() const {
 void App::onSetupMapper() {
     // Die Konsole laedt den Custom-Mapper nur, wenn mega-core.x25 im selben
     // Ordner wie das ROM liegt. Bei nach Buchstaben sortierten Sammlungen
-    // waeren das dutzende Ordner - deshalb automatisch.
+    // waeren das dutzende Ordner - deshalb automatisch. Zuerst ueber USB
+    // (Karte bleibt im EverDrive); ohne Verbindung ueber das Laufwerk.
     std::vector<uint8_t> src = coreDaten();
+    if (!src.empty()) { einrichtenUsbSuchen(std::move(src)); return; }
+    onSetupMapperLaufwerk({});
+}
+
+void App::onSetupMapperLaufwerk(std::vector<uint8_t> src) {
+    if (src.empty()) src = coreDaten();
     if (src.empty()) {
         // Rueckfall wie in der Qt-Fassung: Kern von Hand waehlen.
         const std::string pfad = plattform::DateiWaehlen(fenster_, T("mega-core.x25 wählen"),
@@ -622,7 +684,7 @@ void App::setupMapperIn(const std::string& rootStr, const std::vector<uint8_t>& 
         for (const auto& k : kerne) {
             const fs::path dst = d / k.first;
             std::error_code ec;
-            if (fs::exists(dst, ec) && fs::file_size(dst, ec) != k.second.size()) {
+            if (fs::exists(dst, ec) && !UsbEigenerKern(fs::file_size(dst, ec), {k.second.size()})) {
                 const fs::path rel = d.lexically_relative(root);
                 const fs::path bakDir = (rel.empty() || rel == ".") ? bakRoot : bakRoot / rel;
                 const fs::path bak = bakDir / k.first;
@@ -644,13 +706,478 @@ void App::setupMapperIn(const std::string& rootStr, const std::vector<uint8_t>& 
          Fmt(kerne.size() > 1 ? T("mega-core.x25 und mega-pro.rbf in %1 Ordner kopiert.")
                               : T("mega-core.x25 in %1 Ordner kopiert."), {Zahl(ok)}) +
              (fail ? Fmt(T("\n%1 Ordner konnten nicht beschrieben werden."), {Zahl(fail)}) : std::string()) +
-             (saved ? std::string("\n\n") + T("Vorhandene Originale wurden gesichert und lassen "
+             (saved ? std::string("\n\n") + T("Vorhandene Kerne wurden gesichert und lassen "
                                                "sich in den Optionen wiederherstellen.")
                     : std::string()));
 }
 
-// Gegenstueck zum Einrichten: holt die gesicherten Originale zurueck.
+// ----------------------------------------------------------------------------
+// Einrichtung ueber USB: die Karte bleibt im EverDrive, kein Laufwerk noetig.
+// Nur im EverDrive-Menue (nicht bei laufendem Spiel).
+// ----------------------------------------------------------------------------
+namespace {
+
+const std::set<std::string> kRomExt = {".md", ".bin", ".gen", ".smd", ".68k", ".sgd", ".zip", ".7z", ".rar"};
+const char* const kKernNamen[] = {"mega-core.x25", "mega-pro.rbf"};
+
+std::string UsbPfad(const std::string& eltern, const std::string& name) {
+    return (eltern.empty() || eltern == "/") ? name : eltern + "/" + name;
+}
+
+std::string UsbEndung(const std::string& name) {
+    const size_t p = name.rfind('.');
+    return p == std::string::npos ? std::string() : Kleinschrift(name.substr(p));
+}
+
+// Ordner der Wurzel, die nie Spielordner sind: Krikzz' System (MEGA, darin
+// liegen seine eigenen Kerne unter demselben Namen), unsere Sicherung und
+// Windows-Verwaltung.
+bool UsbAusgenommen(const std::string& eltern, const std::string& name) {
+    if (name.empty() || name[0] == '.' || name[0] == '$') return true;
+    if (eltern != "/") return false;
+    const std::string n = Kleinschrift(name);
+    return n == "mega" || n == Kleinschrift(kBackupDir) || n == "system volume information";
+}
+
+// Ordner einer Datei ("ROMS/S/mega-core.x25" -> "ROMS/S", "a.x25" -> "/").
+std::string UsbOrdnerVon(const std::string& datei) {
+    const size_t p = datei.rfind('/');
+    return p == std::string::npos ? std::string("/") : datei.substr(0, p);
+}
+
+// Laeuft unser Kern (Spiel gestartet)? 0/FF = EverDrive-Menue oder fremder Kern.
+bool UsbSpielLaeuft(EdSerial& ed) {
+    try {
+        const Bytes b = ed.memrd(mdsnoop::kAddrSnoop + mdsnoop::kCtlOffset, 1);
+        return !b.empty() && b[0] > 0 && b[0] < 0xFF;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Ordnerkette anlegen; 8 = gibt es schon.
+bool UsbOrdnerKette(EdSerial& ed, const std::string& pfad) {
+    std::string teil;
+    size_t a = 0;
+    while (a <= pfad.size()) {
+        const size_t e = pfad.find('/', a);
+        teil = pfad.substr(0, e == std::string::npos ? std::string::npos : e);
+        const int c = ed.ordnerAnlegen(teil);
+        if (c != 0 && c != 8) return false;
+        if (e == std::string::npos) break;
+        a = e + 1;
+    }
+    return true;
+}
+
+}  // namespace
+
+void App::einrichtenUsbSuchen(std::vector<uint8_t> core) {
+    if (monitoring_) {
+        Info(T("Mapper einrichten"),
+             T("Bitte zuerst den Monitor stoppen und die Konsole ins EverDrive-Menü zurückbringen "
+               "(Reset), dann erneut einrichten."));
+        return;
+    }
+    if (usbEinrichtungLaeuft_.exchange(true)) return;
+    stopMonitorIfRunning();
+    appendLog(BEIDE(T("Suche die SD-Karte über USB...")));
+    std::thread([this, core]() {
+        auto [ed, port] = find_everdrive();
+        if (!ed && EverDriveAmUsb()) {
+            usbEinrichtungLaeuft_ = false;
+            Post([this]() { AnschlussBelegt(T("Mapper einrichten")); });
+            return;
+        }
+        if (!ed) {
+            usbEinrichtungLaeuft_ = false;
+            Post([this, core]() {
+                appendLog(BEIDE(T("Kein EverDrive über USB gefunden - Einrichtung über das Laufwerk.")));
+                onSetupMapperLaufwerk(core);
+            });
+            return;
+        }
+        if (UsbSpielLaeuft(*ed)) {
+            ed->close();
+            usbEinrichtungLaeuft_ = false;
+            Post([this]() {
+                Info(T("Mapper einrichten"),
+                     T("Auf der Konsole läuft gerade ein Spiel. Bitte Reset drücken, damit das "
+                       "EverDrive-Menü erscheint, und dann erneut einrichten."));
+            });
+            return;
+        }
+
+        // Alle Ordner durchgehen. Ziel ist jeder Ordner mit einem ROM - und
+        // jeder, in dem schon ein Kern liegt (sonst bliebe dort ein alter
+        // Stand stehen, z. B. in ROMS selbst).
+        std::vector<std::string> ziele;
+        const std::vector<uint8_t> pro = proDaten();
+        int schonAktuell = 0;   // Ordner, in denen die aktuellen Kerne schon liegen
+        bool fehler = false;
+        std::vector<std::pair<std::string, int>> offen{{"/", 0}};
+        int gelesen = 0;
+        while (!offen.empty() && gelesen < 3000) {
+            const auto [pfad, tiefe] = offen.back();
+            offen.pop_back();
+            std::vector<EdSerial::Eintrag> l;
+            const int c = ed->ordnerListe(pfad, l);
+            if (c < 0) { fehler = true; break; }
+            if (c != 0) continue;
+            ++gelesen;
+            usbZaehler_ = gelesen;
+            bool ziel = false;
+            for (const auto& e : l) {
+                if (e.ordner) {
+                    if (tiefe < 8 && !UsbAusgenommen(pfad, e.name)) offen.push_back({UsbPfad(pfad, e.name), tiefe + 1});
+                    continue;
+                }
+                const std::string n = Kleinschrift(e.name);
+                if (kRomExt.count(UsbEndung(n)) || n == kKernNamen[0] || n == kKernNamen[1]) ziel = true;
+            }
+            if (!ziel) continue;
+            // Liegen dort schon beide aktuellen Kerne (Inhalt verglichen - gleiche
+            // Groesse allein beweist nichts), bleibt der Ordner unberuehrt.
+            bool aktuell = true;
+            for (const auto* k : {&core, &pro}) {
+                if (k->empty()) continue;
+                const std::string name = k == &core ? kKernNamen[0] : kKernNamen[1];
+                const EdSerial::Eintrag* da = nullptr;
+                for (const auto& e : l)
+                    if (!e.ordner && Kleinschrift(e.name) == name) da = &e;
+                Bytes inhalt;
+                if (!da || da->groesse != k->size() ||
+                    ed->dateiLesen(UsbPfad(pfad, name), (uint32_t)k->size(), inhalt) != 0 || inhalt != *k) {
+                    aktuell = false;
+                    break;
+                }
+            }
+            if (aktuell) ++schonAktuell; else ziele.push_back(pfad);
+        }
+        ed->close();
+        std::sort(ziele.begin(), ziele.end(), [](const std::string& a, const std::string& b) {
+            return Kleinschrift(a) < Kleinschrift(b);
+        });
+        usbEinrichtungLaeuft_ = false;
+
+        const std::string anschluss = port;
+        Post([this, ziele, core, fehler, anschluss, schonAktuell]() {
+            if (fehler) {
+                Warnung(T("Mapper einrichten"),
+                        T("Die SD-Karte ließ sich über USB nicht vollständig lesen. Es wurde nichts "
+                          "geschrieben. Bitte das USB-Kabel kurz trennen und erneut versuchen."));
+                return;
+            }
+            if (ziele.empty() && schonAktuell > 0) {
+                appendLog(BEIDE(Fmt(T("Alle %1 Ordner haben schon den aktuellen MEGA-RAW-Kern."),
+                                    {Zahl((long long)schonAktuell)})));
+                Info(T("Mapper einrichten"),
+                     Fmt(T("Alle %1 Ordner mit Spielen haben schon den aktuellen MEGA-RAW-Kern. "
+                           "Es gibt nichts zu tun."), {Zahl((long long)schonAktuell)}));
+                return;
+            }
+            if (ziele.empty()) {
+                Info(T("Mapper einrichten"), T("Auf der SD-Karte wurden keine ROMs gefunden."));
+                return;
+            }
+            if (schonAktuell > 0)
+                appendLog(BEIDE(Fmt(T("%1 Ordner haben schon den aktuellen MEGA-RAW-Kern und bleiben unverändert."),
+                                    {Zahl((long long)schonAktuell)})));
+            appendLog(BEIDE(Fmt(T("SD-Karte über USB gelesen (%1): %2 Ordner mit Spielen."),
+                                {anschluss, Zahl((long long)ziele.size())})));
+            std::vector<std::string> anzeige;
+            for (const std::string& z : ziele) anzeige.push_back(z == "/" ? "/" : "/" + z);
+            Bestaetigen(T("Mapper einrichten"),
+                        Fmt(T("Jetzt wird der MEGA-RAW-Kern in die Ordner kopiert, in denen er fehlt "
+                              "oder veraltet ist.\n\n"
+                              "Das Tool hat diese %1 Ordner auf der SD-Karte selbst gefunden. Du musst "
+                              "nichts auswählen - die Liste ist nur zur Kontrolle.\n\n"
+                              "Deine Spiele und Spielstände bleiben unverändert - es kommt nur je eine "
+                              "Mapper-Datei dazu.\n\n"
+                              "Fremde Mapper-Dateien werden vorher gesichert und lassen sich jederzeit "
+                              "unter Optionen > \"Mapper wiederherstellen\" zurückholen.\n\n"
+                              "Mit OK geht es los."),
+                            {Zahl((long long)ziele.size())}),
+                        anzeige, [this, ziele, core]() { einrichtenUsbSchreiben(ziele, core); });
+        });
+    }).detach();
+}
+
+void App::einrichtenUsbSchreiben(std::vector<std::string> ziele, std::vector<uint8_t> core) {
+    if (usbEinrichtungLaeuft_.exchange(true)) return;
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> kerne;
+    kerne.push_back({kKernNamen[0], std::move(core)});
+    std::vector<uint8_t> pro = proDaten();
+    if (!pro.empty()) kerne.push_back({kKernNamen[1], std::move(pro)});
+    appendLog(BEIDE(Fmt(T("Schreibe die Kerne in %1 Ordner..."), {Zahl((long long)ziele.size())})));
+
+    std::thread([this, ziele, kerne]() {
+        auto ende = [this](const std::string& titel, const std::string& text, bool warnung) {
+            usbEinrichtungLaeuft_ = false;
+            Post([this, titel, text, warnung]() {
+                if (warnung) Warnung(titel, text); else Info(titel, text);
+            });
+        };
+        auto [ed, port] = find_everdrive();
+        if (!ed) {
+            ende(T("Mapper einrichten"), T("Die Verbindung zum EverDrive ist weg. Es wurde nichts geschrieben."), true);
+            return;
+        }
+        if (UsbSpielLaeuft(*ed)) {
+            ed->close();
+            ende(T("Mapper einrichten"),
+                 T("Auf der Konsole läuft inzwischen ein Spiel. Es wurde nichts geschrieben. "
+                   "Bitte Reset drücken und erneut einrichten."), true);
+            return;
+        }
+
+        int ok = 0, fail = 0, saved = 0;
+        bool abbruch = false;
+        usbGesamt_ = (int)ziele.size();
+        for (size_t i = 0; i < ziele.size() && !abbruch; ++i) {
+            usbZaehler_ = (int)i;
+            const std::string& d = ziele[i];
+            std::vector<EdSerial::Eintrag> l;
+            if (ed->ordnerListe(d, l) < 0) { abbruch = true; break; }
+            bool ordnerOk = true;
+            for (const auto& k : kerne) {
+                const std::string dst = UsbPfad(d, k.first);
+                const EdSerial::Eintrag* vorhanden = nullptr;
+                for (const auto& e : l)
+                    if (!e.ordner && Kleinschrift(e.name) == k.first) vorhanden = &e;
+
+                // Fremde Datei (keine Groesse eines MEGA-RAW-Kerns) erst sichern -
+                // nur beim ersten Mal. Gelingt das nicht, bleibt sie stehen.
+                if (vorhanden && !UsbEigenerKern(vorhanden->groesse, {k.second.size()})) {
+                    const std::string bakDir = d == "/" ? std::string(kBackupDir) : std::string(kBackupDir) + "/" + d;
+                    const std::string bak = bakDir + "/" + k.first;
+                    EdSerial::Eintrag bi;
+                    const int ci = ed->dateiInfo(bak, bi);
+                    if (ci < 0) { abbruch = true; break; }
+                    if (ci != 0) {
+                        Bytes alt;
+                        const bool gesichert = UsbOrdnerKette(*ed, bakDir) &&
+                                               ed->dateiLesen(dst, vorhanden->groesse, alt) == 0 &&
+                                               alt.size() == vorhanden->groesse &&
+                                               ed->dateiSchreiben(bak, alt) == 0;
+                        if (!gesichert) { ordnerOk = false; continue; }
+                        ++saved;
+                    }
+                }
+                // Schreiben und zur Kontrolle zuruecklesen.
+                Bytes zurueck;
+                int c = ed->dateiSchreiben(dst, k.second);
+                if (c == 0) c = ed->dateiLesen(dst, (uint32_t)k.second.size(), zurueck);
+                if (c < 0) { abbruch = true; break; }
+                if (c != 0 || zurueck != k.second) ordnerOk = false;
+            }
+            if (abbruch) break;
+            if (ordnerOk) ++ok; else ++fail;
+            appendLog(Fmt("%1/%2  /%3  %4", {Zahl((long long)i + 1), Zahl((long long)ziele.size()),
+                                             d == "/" ? std::string() : d, ordnerOk ? "ok" : T("FEHLER")}));
+        }
+        ed->close();
+
+        if (saved > 0)
+            appendLog(BEIDE(Fmt(T("%1 vorhandene Datei(en) nach %2 gesichert."), {Zahl(saved), kBackupDir})));
+        appendLog(BEIDE(Fmt(T("Mapper eingerichtet: %1 Ordner beschrieben, %2 fehlgeschlagen."), {Zahl(ok), Zahl(fail)})));
+        std::string text = Fmt(kerne.size() > 1 ? T("mega-core.x25 und mega-pro.rbf in %1 Ordner kopiert.")
+                                                : T("mega-core.x25 in %1 Ordner kopiert."), {Zahl(ok)});
+        if (fail) text += Fmt(T("\n%1 Ordner konnten nicht beschrieben werden."), {Zahl(fail)});
+        if (abbruch)
+            text += std::string("\n\n") + T("Die Verbindung brach ab. Bitte das USB-Kabel kurz trennen und "
+                                            "die Einrichtung wiederholen.");
+        if (saved)
+            text += std::string("\n\n") + T("Vorhandene Kerne wurden gesichert und lassen "
+                                            "sich in den Optionen wiederherstellen.");
+        ende(T("Mapper einrichten"), text, abbruch || fail);
+    }).detach();
+}
+
+// Gegenstueck zum Einrichten: holt die gesicherten Originale zurueck. Zuerst
+// ueber USB (nur im EverDrive-Menue), ohne Verbindung ueber das Laufwerk.
 void App::onRestoreMappers() {
+    if (monitoring_) {
+        Info(T("Mapper wiederherstellen"),
+             T("Bitte zuerst den Monitor stoppen und die Konsole ins EverDrive-Menü zurückbringen "
+               "(Reset), dann erneut versuchen."));
+        return;
+    }
+    if (usbEinrichtungLaeuft_.exchange(true)) return;
+    stopMonitorIfRunning();
+    const std::map<std::string, size_t> groesse = {{kKernNamen[0], coreDaten().size()},
+                                                   {kKernNamen[1], proDaten().size()}};
+    appendLog(BEIDE(T("Suche die SD-Karte über USB...")));
+    std::thread([this, groesse]() {
+        auto [ed, port] = find_everdrive();
+        if (!ed && EverDriveAmUsb()) {
+            usbEinrichtungLaeuft_ = false;
+            Post([this]() { AnschlussBelegt(T("Mapper wiederherstellen")); });
+            return;
+        }
+        if (!ed) {
+            usbEinrichtungLaeuft_ = false;
+            Post([this]() {
+                appendLog(BEIDE(T("Kein EverDrive über USB gefunden - Wiederherstellen über das Laufwerk.")));
+                onRestoreMappersLaufwerk();
+            });
+            return;
+        }
+        if (UsbSpielLaeuft(*ed)) {
+            ed->close();
+            usbEinrichtungLaeuft_ = false;
+            Post([this]() {
+                Info(T("Mapper wiederherstellen"),
+                     T("Auf der Konsole läuft gerade ein Spiel. Bitte Reset drücken, damit das "
+                       "EverDrive-Menü erscheint, und dann erneut versuchen."));
+            });
+            return;
+        }
+
+        // Gesicherte Originale (im Sicherungsordner) und unsere eigenen Kerne
+        // (gleiche Groesse wie der eingebettete) auf der restlichen Karte.
+        std::vector<std::pair<std::string, uint32_t>> gesichert;
+        std::vector<std::string> eigene;
+        bool fehler = false;
+        std::vector<size_t> aktuell;
+        for (const auto& g : groesse) aktuell.push_back(g.second);
+        EdSerial& edr = *ed;
+        const std::string bakRoot = kBackupDir;
+        auto lauf = [&](const std::string& start, bool imBackup) {
+            std::vector<std::pair<std::string, int>> offen{{start, 0}};
+            int n = 0;
+            while (!offen.empty() && n < 3000) {
+                const auto [pfad, tiefe] = offen.back();
+                offen.pop_back();
+                std::vector<EdSerial::Eintrag> l;
+                const int c = edr.ordnerListe(pfad, l);
+                if (c < 0) { fehler = true; return; }
+                if (c != 0) continue;   // z. B. Sicherungsordner gibt es nicht
+                ++n;
+                for (const auto& e : l) {
+                    if (e.ordner) {
+                        const bool weiter = imBackup ? !e.name.empty() && e.name[0] != '.' : !UsbAusgenommen(pfad, e.name);
+                        if (tiefe < 9 && weiter) offen.push_back({UsbPfad(pfad, e.name), tiefe + 1});
+                        continue;
+                    }
+                    const auto it = groesse.find(Kleinschrift(e.name));
+                    if (it == groesse.end()) continue;
+                    // Gesicherte alte MEGA-RAW-Kerne sind keine Originale.
+                    const bool eigen = UsbEigenerKern(e.groesse, aktuell);
+                    if (imBackup) { if (!eigen) gesichert.push_back({UsbPfad(pfad, e.name), e.groesse}); }
+                    else if (eigen) eigene.push_back(UsbPfad(pfad, e.name));
+                }
+            }
+        };
+        lauf("/", false);
+        if (!fehler) lauf(bakRoot, true);
+        ed->close();
+        usbEinrichtungLaeuft_ = false;
+
+        Post([this, gesichert, eigene, fehler, bakRoot]() {
+            const char* titel = T("Mapper wiederherstellen");
+            if (fehler) {
+                Warnung(titel, T("Die SD-Karte ließ sich über USB nicht vollständig lesen. Es wurde nichts "
+                                 "geändert. Bitte das USB-Kabel kurz trennen und erneut versuchen."));
+                return;
+            }
+            if (gesichert.empty() && eigene.empty()) {
+                Info(titel, T("Auf der SD-Karte gibt es nichts zurückzusetzen."));
+                return;
+            }
+            // In Ordnern zaehlen, nicht in Dateien (je Ordner CORE + PRO).
+            std::set<std::string> ordnerEigen, ordnerOrig;
+            for (const auto& e : eigene) ordnerEigen.insert(UsbOrdnerVon(e));
+            for (const auto& g : gesichert) ordnerOrig.insert(UsbOrdnerVon(g.first.substr(bakRoot.size() + 1)));
+            std::set<std::string> alle = ordnerEigen;
+            alle.insert(ordnerOrig.begin(), ordnerOrig.end());
+            std::vector<std::string> anzeige;
+            for (const std::string& o : alle) {
+                std::string z = o == "/" ? "/" : "/" + o;
+                if (ordnerOrig.count(o)) z += std::string("  -  ") + T("MEGA-RAW-Mapper raus, früheren Mapper zurück");
+                else z += std::string("  -  ") + T("nur den MEGA-RAW-Mapper entfernen");
+                anzeige.push_back(z);
+            }
+            std::string text = ordnerEigen.size() == 1
+                                   ? std::string(T("Aus 1 Ordner wird der MEGA-RAW-Mapper wieder entfernt."))
+                                   : Fmt(T("Aus %1 Ordnern wird der MEGA-RAW-Mapper wieder entfernt."),
+                                         {Zahl((long long)ordnerEigen.size())});
+            text += std::string("\n") + T("Deine Spiele und Spielstände bleiben unangetastet - gelöscht "
+                                          "werden nur die Mapper-Dateien von MEGA-RAW.");
+            if (ordnerOrig.size() == 1)
+                text += std::string("\n") + T("In 1 Ordner wird der Mapper zurückgeschrieben, der vor "
+                                              "MEGA-RAW dort lag.");
+            else if (!ordnerOrig.empty())
+                text += std::string("\n") + Fmt(T("In %1 Ordnern wird der Mapper zurückgeschrieben, der vor "
+                                                  "MEGA-RAW dort lag."), {Zahl((long long)ordnerOrig.size())});
+            text += std::string("\n\n") + T("Das Tool hat alles selbst gefunden - die Liste ist nur zur "
+                                            "Kontrolle.\n\nMit OK geht es los.");
+            Bestaetigen(titel, text, anzeige,
+                        [this, gesichert, eigene]() { wiederherstellenUsbSchreiben(gesichert, eigene); });
+        });
+    }).detach();
+}
+
+void App::wiederherstellenUsbSchreiben(std::vector<std::pair<std::string, uint32_t>> gesichert,
+                                       std::vector<std::string> eigene) {
+    if (usbEinrichtungLaeuft_.exchange(true)) return;
+    std::thread([this, gesichert, eigene]() {
+        const char* titel = T("Mapper wiederherstellen");
+        auto ende = [this, titel](const std::string& text, bool warnung) {
+            usbEinrichtungLaeuft_ = false;
+            const std::string t = titel;
+            Post([this, t, text, warnung]() { if (warnung) Warnung(t, text); else Info(t, text); });
+        };
+        auto [ed, port] = find_everdrive();
+        if (!ed) { ende(T("Die Verbindung zum EverDrive ist weg. Es wurde nichts geändert."), true); return; }
+        if (UsbSpielLaeuft(*ed)) {
+            ed->close();
+            ende(T("Auf der Konsole läuft inzwischen ein Spiel. Es wurde nichts geändert. "
+                   "Bitte Reset drücken und erneut versuchen."), true);
+            return;
+        }
+        const std::string bakRoot = kBackupDir;
+        bool abbruch = false;
+        // Erst unsere Kopien entfernen, dann Originale zurueckschreiben.
+        std::set<std::string> ordnerEntfernt, ordnerZurueck;
+        for (const std::string& f : eigene) {
+            const int c = ed->loeschen(f);
+            if (c < 0) { abbruch = true; break; }
+            if (c == 0) ordnerEntfernt.insert(UsbOrdnerVon(f));
+        }
+        int ok = 0, fail = 0;
+        for (size_t i = 0; i < gesichert.size() && !abbruch; ++i) {
+            const std::string& bak = gesichert[i].first;
+            const std::string dst = bak.substr(bakRoot.size() + 1);
+            const size_t schnitt = dst.rfind('/');
+            Bytes daten, zurueck;
+            int c = ed->dateiLesen(bak, gesichert[i].second, daten);
+            if (c == 0 && daten.size() != gesichert[i].second) c = 1;
+            if (c == 0 && schnitt != std::string::npos && !UsbOrdnerKette(*ed, dst.substr(0, schnitt))) c = 1;
+            if (c == 0) c = ed->dateiSchreiben(dst, daten);
+            if (c == 0) c = ed->dateiLesen(dst, (uint32_t)daten.size(), zurueck);
+            if (c < 0) { abbruch = true; break; }
+            const bool gut = c == 0 && zurueck == daten;
+            if (gut) { ++ok; ordnerZurueck.insert(UsbOrdnerVon(dst)); } else ++fail;
+            appendLog(Fmt("%1/%2  /%3  %4", {Zahl((long long)i + 1), Zahl((long long)gesichert.size()), dst,
+                                             gut ? "ok" : T("FEHLER")}));
+        }
+        ed->close();
+        const long long nEnt = (long long)ordnerEntfernt.size(), nZur = (long long)ordnerZurueck.size();
+        appendLog(BEIDE(Fmt(T("Zurücksetzen: MEGA-RAW aus %1 Ordnern entfernt, früherer Mapper in %2 Ordnern "
+                              "zurück, %3 Datei(en) fehlgeschlagen."), {Zahl(nEnt), Zahl(nZur), Zahl(fail)})));
+        std::string text = nEnt ? std::string(T("Die MEGA-RAW-Mapper wurden erfolgreich entfernt."))
+                                : std::string(T("Auf der SD-Karte lagen keine MEGA-RAW-Mapper."));
+        if (nZur) text += std::string("\n\n") + T("Die Kerne, die vorher dort lagen, wurden zurückgespielt.");
+        if (fail) text += Fmt(T("\n%1 Datei(en) konnten nicht zurückgeschrieben werden."), {Zahl(fail)});
+        if (abbruch)
+            text += std::string("\n\n") + T("Die Verbindung brach ab. Bitte das USB-Kabel kurz trennen und "
+                                            "erneut versuchen.");
+        ende(text, abbruch || fail);
+    }).detach();
+}
+
+void App::onRestoreMappersLaufwerk() {
     const std::string root = plattform::OrdnerWaehlen(
         fenster_, T("SD-Karte wählen - das Laufwerk selbst (mit dem Ordner MEGA), z.B. H:\\"), settings_.rom_root);
     if (root.empty()) return;
@@ -677,20 +1204,25 @@ void App::restoreIn(const std::string& rootStr) {
         return aus;
     };
 
+    std::vector<size_t> aktuell;
+    for (const auto& g : unsereGroesse) aktuell.push_back(g.second);
     std::vector<fs::path> gesichert;
     std::error_code ec;
-    if (fs::is_directory(bakRoot, ec)) gesichert = alleKerne(bakRoot);
+    if (fs::is_directory(bakRoot, ec))
+        for (const fs::path& f : alleKerne(bakRoot))
+            if (!UsbEigenerKern(fs::file_size(f, ec), aktuell)) gesichert.push_back(f);   // alte MEGA-RAW-Kerne sind keine Originale
 
     std::vector<fs::path> eigene;
     for (const fs::path& f : alleKerne(root)) {
         if (Kleinschrift(Generisch(f)).rfind(bakText, 0) == 0) continue;
-        const size_t soll = unsereGroesse.at(Kleinschrift(f.filename().u8string()));
-        if (soll == 0 || fs::file_size(f, ec) != soll) continue;
+        // Krikzz' Systemordner nie anfassen (dort liegen seine eigenen Kerne).
+        if (Kleinschrift(Generisch(f.lexically_relative(root))).rfind("mega/", 0) == 0) continue;
+        if (!UsbEigenerKern(fs::file_size(f, ec), aktuell)) continue;
         eigene.push_back(f);
     }
 
     if (gesichert.empty() && eigene.empty()) {
-        Info(T("Original-Mapper wiederherstellen"), Fmt(T("In %1 gibt es nichts zurückzusetzen."), {rootStr}));
+        Info(T("Mapper wiederherstellen"), Fmt(T("In %1 gibt es nichts zurückzusetzen."), {rootStr}));
         return;
     }
 
@@ -701,7 +1233,7 @@ void App::restoreIn(const std::string& rootStr) {
         frage += Fmt(T("%1 von MEGA-RAW angelegte Datei(en) entfernen."), {Zahl((long long)eigene.size())}) + "\n";
     frage += std::string("\n") + T("Fortfahren?");
 
-    Frage(T("Original-Mapper wiederherstellen"), frage, [this, root, bakRoot, gesichert, eigene]() {
+    Frage(T("Mapper wiederherstellen"), frage, [this, root, bakRoot, gesichert, eigene]() {
         // Erst unsere Kopien entfernen, dann Originale zurueckschreiben.
         std::error_code ec;
         int entfernt = 0;
@@ -716,11 +1248,13 @@ void App::restoreIn(const std::string& rootStr) {
             if (fs::copy_file(b, dst, ec)) ++ok; else ++fail;
         }
 
-        appendLog(BEIDE(Fmt(T("Zurücksetzen: %1 Original(e) zurück, %2 eigene entfernt, %3 fehlgeschlagen."),
+        appendLog(BEIDE(Fmt(T("Zurücksetzen: %1 frühere(r) Kern(e) zurück, %2 MEGA-RAW-Mapper entfernt, %3 fehlgeschlagen."),
                       {Zahl(ok), Zahl(entfernt), Zahl(fail)})));
-        Info(T("Original-Mapper wiederherstellen"),
-             Fmt(T("%1 Originaldatei(en) zurückgeschrieben, %2 eigene entfernt."), {Zahl(ok), Zahl(entfernt)}) +
-                 (fail ? Fmt(T("\n%1 fehlgeschlagen."), {Zahl(fail)}) : std::string()));
+        std::string text = entfernt ? std::string(T("Die MEGA-RAW-Mapper wurden erfolgreich entfernt."))
+                                    : std::string(T("Auf der SD-Karte lagen keine MEGA-RAW-Mapper."));
+        if (ok) text += std::string("\n\n") + T("Die Kerne, die vorher dort lagen, wurden zurückgespielt.");
+        if (fail) text += Fmt(T("\n%1 Datei(en) konnten nicht zurückgeschrieben werden."), {Zahl(fail)});
+        Info(T("Mapper wiederherstellen"), text);
     });
 }
 
@@ -730,6 +1264,96 @@ void App::restoreIn(const std::string& rootStr) {
 
 // Erkennung ueber den MD5, den der Mapper selbst rechnet. Ueber USB gehen
 // dabei 16 Byte statt zwei Megabyte.
+// Erkennung ueber die SD-Karte (wie RAW-NES): Pfad des laufenden ROMs vom
+// EverDrive, Datei per USB lesen, MD5 am PC. Die Datei muss zum laufenden
+// Spiel passen (VBlank-Vektor an $78 = vom Mapper festgehaltener Vektor).
+// Einmal gelesene Dateien merkt sich das Tool (Pfad|Groesse -> MD5).
+// Klappt etwas nicht, folgt die Erkennung aus dem Mapper (detectGame).
+void App::sdErkennungStarten() {
+    appendLog(BEIDE(T("Erkenne laufendes Spiel...")));
+    sdErk_ = 1;
+    usbEinrichtungLaeuft_ = true;   // "Bitte warten" ab 3 s, keine Leerlauf-Abfrage
+    const std::map<std::string, std::string> cache = settings_.md5_cache;
+    auto ziel = post_;
+    App* self = this;
+    std::thread([ziel, self, cache]() {
+        std::string md5, schluessel, name, grund, wie;
+        long long kb = 0, ms = 0;
+        try {
+            auto [ed, port] = find_everdrive();
+            if (!ed) {
+                grund = "kein EverDrive";
+            } else {
+                const Bytes b = ed->memrdNoRecover(mdsnoop::kAddrSnoop + mdsnoop::kCtlOffset, 1);
+                std::string pfad;
+                EdSerial::Eintrag info;
+                const Bytes vek = ed->memrdNoRecover(mdsnoop::kAddrSnoop + 0xB005, 4);   // Vektor $78 (Mapper)
+                if (b.empty() || b[0] == 0 || b[0] == 0xFF) grund = "kein Spiel mit MEGA-RAW-Kern";
+                else if (ed->romPfad(pfad) != 0 || pfad.empty()) grund = "Pfad des Spiels nicht lesbar";
+                else if (ed->dateiInfo(pfad, info) != 0 || info.groesse < 0x200 || info.groesse > 0x800000)
+                    grund = "Datei nicht lesbar";
+                else {
+                    const size_t s = pfad.find_last_of('/');
+                    name = s == std::string::npos ? pfad : pfad.substr(s + 1);
+                    Bytes kopf;
+                    if (ed->dateiLesen(pfad, 0x200, kopf) != 0 || kopf.size() != 0x200) grund = "Datei nicht lesbar";
+                    else if (vek.size() != 4 || !std::equal(vek.begin(), vek.end(), kopf.begin() + 0x78))
+                        grund = "Datei passt nicht zum laufenden Spiel";
+                    else {
+                        schluessel = pfad + "|" + std::to_string(info.groesse);
+                        const auto t0 = std::chrono::steady_clock::now();
+                        auto c = cache.find(schluessel);
+                        if (c != cache.end()) {
+                            md5 = c->second;
+                            wie = "gemerkt";
+                        } else {
+                            Bytes daten;
+                            if (ed->dateiLesen(pfad, info.groesse, daten) != 0 || daten.size() != info.groesse)
+                                grund = "Datei nicht lesbar";
+                            else {
+                                md5 = md5_hex(std::vector<uint8_t>(daten.begin(), daten.end()));
+                                wie = "gelesen";
+                            }
+                        }
+                        kb = info.groesse / 1024;
+                        ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+                    }
+                }
+                ed->close();
+            }
+        } catch (const std::exception& e) {
+            grund = e.what();
+        }
+        std::lock_guard<std::mutex> l(ziel->m);
+        if (!ziel->app) return;
+        ziel->auftraege.push_back([self, md5, schluessel, name, grund, wie, kb, ms]() {
+            self->usbEinrichtungLaeuft_ = false;
+            if (!md5.empty()) {
+                self->sdMd5_ = md5;
+                self->sdErk_ = 2;
+                self->appendLog(BEIDE(Fmt(T("Erkannt über die Datei auf der SD-Karte: %1 (%2 KB, %3 ms)"),
+                                          {name, Zahl(kb), Zahl(ms)})));
+                self->appendLog("MD5: " + md5);
+                if (wie == "gelesen") {
+                    self->settings_.md5_cache[schluessel] = md5;
+                    self->settings_.save(self->settingsPath_);
+                }
+            } else {
+                self->sdErk_ = 3;
+                self->appendLog(BEIDE(T("Datei auf der SD-Karte nicht verwendbar - Erkennung über den Mapper.")));
+                if (!grund.empty()) self->appendLog(BEIDE("  (" + std::string(T(grund.c_str())) + ")"));
+            }
+            if (!self->monitoring_) {
+                self->onToggleMonitor();
+                // Kein Set / gescheitert: fuer dieses Spiel nicht von selbst neu
+                if (!self->monitoring_) self->autoPause_ = true;
+            } else {
+                self->sdErk_ = 0;
+            }
+        });
+    }).detach();
+}
+
 bool App::detectGame() {
     erkennungErklaert_ = false;
     std::vector<std::string> versuche;
@@ -939,17 +1563,40 @@ void App::onToggleMonitor() {
         statusStil_ = StatusStil::Grau;
         updateMonitorState();
         appendLog(BEIDE(T("Monitor gestoppt.")));
+        // Stopp von Hand: fuer dieses Spiel nicht von selbst neu starten
+        autoPause_ = true;
+        spielSeitMs_ = 0;
+        edStatus_ = BEIDE(T("Monitor angehalten - startet beim nächsten Spiel von selbst"));
+        naechsteProbeMs_ = JetztMs() + 3000;
         return;
     }
     if (token_.empty()) { appendLog(BEIDE(T("Bitte zuerst einloggen."))); return; }
     verbindungWeg_ = false;
 
-    // Kein Spiel gewaehlt: aus dem Mapper erkennen.
+    // Kein Spiel gewaehlt: erst ueber die Datei auf der SD-Karte (wie RAW-NES,
+    // im Hintergrund, ohne Zugriff auf den Konsolenbus), sonst aus dem Mapper.
     if (!setHasSet_) {
-        appendLog(BEIDE(T("Erkenne laufendes Spiel...")));
-        if (!detectGame()) {
+        if (sdErk_ == 1) return;                 // laeuft noch
+        if (sdErk_ == 0) { sdErkennungStarten(); return; }
+        const int ergebnis = sdErk_;
+        sdErk_ = 0;
+        bool ok = false;
+        if (ergebnis == 2) {
+            romPath_.clear();
+            romPathText_ = BEIDE(T("(von der Konsole erkannt)"));
+            game_.reset();
+            setHasSet_ = false;
+            erkennungErklaert_ = false;
+            tryLoadGame(sdMd5_);
+            ok = setHasSet_;
+        } else {
+            ok = detectGame();
+        }
+        if (!ok) {
             // Nur wenn die Ursache nicht schon genannt wurde.
-            if (!erkennungErklaert_)
+            if (game_ && game_->raw_core == 0)
+                appendLog(BEIDE(T("Für dieses Spiel gibt es bei RetroAchievements keine Achievements.")));
+            else if (!erkennungErklaert_)
                 appendLog(BEIDE(T("Erkennung fehlgeschlagen - bitte ROM von Hand wählen.")));
             return;
         }
@@ -959,7 +1606,7 @@ void App::onToggleMonitor() {
 
     Game gm = game_ ? *game_ : Game{};
     monWorker_ = std::make_unique<MonitorWorker>(port, gm, userBuf_, token_, client_,
-                                                 kHardcoreAktiv && settings_.hardcore);
+                                                 kHardcoreAktiv && settings_.hardcore, settings_.popup_in_game);
     const int gen = ++monGeneration_;
     MonitorWorker& w = *monWorker_;
     App* self = this;
@@ -991,12 +1638,15 @@ void App::onToggleMonitor() {
             a.rebuildAcList();
             a.statusText_ = BEIDE(T("Kein Spiel geladen."));
             a.statusStil_ = StatusStil::Grau;
+            a.autoPause_ = false;   // das naechste Spiel startet den Monitor von selbst
+            a.spielSeitMs_ = 0;
         }, false);
     };
     w.finished = [weiter]() { weiter([](App& a) { a.onWorkerFinished(); }, false); };
 
     w.startThread();
     monitoring_ = true;
+    edStatus_ = BEIDE(T("EverDrive wird beim Monitor-Start automatisch gesucht"));
     monitorHint_ = BEIDE(std::string("\xE2\x9C\x93 ") + T("Verbunden ") + port);
     monitorHintFarbe_ = kOk;
     appendLog(BEIDE(T("Verbinde mit ") + port + " ..."));
@@ -1062,14 +1712,12 @@ void App::onWorkerCoreMissing() {
     ramStil_ = RamStil::Fehler;
     ramText_ = BEIDE(T("RAM: [RA-Mapper nicht geladen]"));
     Warnung(T("RA-Mapper nicht geladen"),
-            T("Auf der Konsole läuft nicht unser Custom-Mapper, sondern der "
-              "Standard-Core. Ohne ihn gibt es keinen Speicherspiegel und keine "
-              "Achievements.\n\n"
-              "Das Spiel so starten:\n\n"
-              "über USB:\n"
-              "  edlink run --file SPIEL.md --fpga mega-core.x25   (PRO: mega-pro.rbf)\n\n"
-              "über SD-Karte:\n"
-              "  mega-core.x25 (CORE) bzw. mega-pro.rbf (PRO) in denselben Ordner wie das ROM legen"));
+            T("Auf der Konsole läuft nicht der MEGA-RAW-Mapper, sondern der "
+              "Standard-Mapper des EverDrive. Ohne ihn gibt es keine Achievements.\n\n"
+              "So geht es:\n"
+              "1. Konsole ins EverDrive-Menü bringen (Reset)\n"
+              "2. Im Tool \"Mapper auf SD-Karte einrichten...\" wählen\n"
+              "3. Das Spiel neu starten"));
 }
 
 void App::onWorkerConnectionLost(const std::string& reason) {
@@ -1099,6 +1747,124 @@ void App::onWorkerFinished() {
         }
     }
     verbindungWeg_ = false;
+}
+
+// Ohne Monitor alle 3 s nachsehen, was die Konsole macht (nur der Anschluss
+// mit der EverDrive-Kennung 38DF:0018 - fremde Anschluesse, z. B. Bluetooth,
+// koennen beim Oeffnen lange haengen). Ablauf wie RAW-NES: Anschluss bleibt
+// offen; Systeminfo (antwortet das EverDrive nur bei eingeschalteter Konsole -
+// beim N8 PRO gemessen, beim Mega EverDrive NICHT, daher Rueckfall ohne sie);
+// dann Build-Byte des Kerns, und nur mit unserem Kern die Bildzaehler.
+void App::autoStartPruefen() {
+    g_vorFindEverdrive = LeerlaufSchliessen;   // jeder andere Zugriff gibt den Anschluss frei
+    if (monitoring_ || token_.empty() || probeLaeuft_ || usbEinrichtungLaeuft_) return;
+    const long long jetzt = JetztMs();
+    if (jetzt < naechsteProbeMs_) return;
+    naechsteProbeMs_ = jetzt + 3000;
+    std::string port;
+    for (const auto& p : availableSerialPorts())
+        if (p.hatKennung && p.vid == 0x38DF && p.pid == 0x0018) { port = p.name; break; }
+    if (port.empty()) { LeerlaufSchliessen(); autoZustand(0, -1); return; }
+    probeLaeuft_ = true;
+    auto ziel = post_;
+    App* self = this;
+    std::thread([ziel, self, port]() {
+        int z = 0, zaehler = -1;
+        std::string mess;
+        {
+            std::lock_guard<std::mutex> g(Leerlauf().m);
+            auto& ed = Leerlauf().ed;
+            try {
+                if (!ed || !ed->isOpen() || ed->portName() != port) {
+                    ed = std::make_unique<EdSerial>(port);
+                    ed->open();
+                    mess += "geoeffnet ";
+                }
+                Bytes si = ed->sysInfoNoRecover();
+                if (si.size() != 64 && ed->neuOeffnen()) { si = ed->sysInfoNoRecover(); mess += "neu ";  }
+                mess += si.size() == 64 ? "si=ok(pwr " + LHx(si[53]) + ") " : "si=keine ";
+                try {
+                    const Bytes b = ed->memrdNoRecover(mdsnoop::kAddrSnoop + mdsnoop::kCtlOffset, 1);
+                    mess += "build=" + (b.empty() ? std::string("-") : LHx(b[0])) + " ";
+                    z = (!b.empty() && b[0] != 0 && b[0] != 0xFF) ? 2 : 1;
+                    if (z == 2) {
+                        const Bytes v = ed->memrdNoRecover(mdsnoop::kAddrSnoop + 0xB00A, 2);
+                        const Bytes h = ed->memrdNoRecover(mdsnoop::kAddrSnoop + mdsnoop::kHintCntOffset, 1);
+                        if (v.size() == 2 && h.size() == 1) {
+                            zaehler = (v[0] << 16) | (v[1] << 8) | h[0];
+                            mess += "vb=" + LHx(v[0]) + LHx(v[1]) + " hb=" + LHx(h[0]) + " ";
+                        }
+                    }
+                } catch (...) {
+                    z = 3;   // EverDrive antwortet, der Speicher nicht: Konsole aus
+                    mess += "memrd fehlgeschlagen ";
+                }
+            } catch (const std::exception& e) {
+                z = 0;       // Anschluss belegt oder weg
+                mess += std::string("Fehler: ") + e.what() + " ";
+                if (ed) ed->close();
+                ed.reset();
+            }
+        }
+        TestLogZeile("LEERLAUF: " + mess + "-> " + std::to_string(z));
+        std::lock_guard<std::mutex> l(ziel->m);
+        if (!ziel->app) return;
+        ziel->auftraege.push_back([self, z, zaehler]() {
+            self->probeLaeuft_ = false;
+            self->autoZustand(z, zaehler);
+        });
+    }).detach();
+}
+
+void App::AnschlussBelegt(const char* titel) {
+    appendLog(BEIDE(T("Das EverDrive steckt am USB, antwortet aber nicht - der Anschluss ist belegt.")));
+    Info(titel, T("Das EverDrive ist per USB angeschlossen, aber der Anschluss ist belegt. Läuft noch "
+                  "ein zweites MEGA-RAW-Fenster oder ein anderes Programm mit dem EverDrive? Bitte "
+                  "schließen und erneut versuchen."));
+}
+
+void App::autoZustand(int z, int zaehler) {
+    if (monitoring_) return;
+    const long long jetzt = JetztMs();
+    // "Spiel laeuft" erst, wenn sich ein Bildzaehler (VBlank- oder HBlank-
+    // Abrufe) zwischen zwei Abfragen bewegt - der Kern ist schon waehrend des
+    // Spielstarts geladen, der Hash in der Startphase kann stoeren. Zaehlt gar
+    // nichts (Spiel ohne Interrupts), nach 20 s trotzdem.
+    bool laeuft = false;
+    if (z != 2) {
+        spielSeitMs_ = 0;
+        kernSeitMs_ = 0;
+        letzterZaehler_ = -1;
+        autoPause_ = false;   // Spiel verlassen: das naechste startet von selbst
+    } else {
+        if (kernSeitMs_ == 0) kernSeitMs_ = jetzt;
+        laeuft = zaehler >= 0 && letzterZaehler_ >= 0 && zaehler != letzterZaehler_;
+        letzterZaehler_ = zaehler;
+        if (!laeuft && jetzt - kernSeitMs_ >= 20000) laeuft = true;
+        if (!laeuft) spielSeitMs_ = 0;
+        else if (spielSeitMs_ == 0) spielSeitMs_ = jetzt;
+    }
+    leerlauf_ = z;
+    switch (z) {
+        case 0: edStatus_ = BEIDE(T("Kein EverDrive gefunden - ist das USB-Kabel angeschlossen?")); break;
+        case 1: edStatus_ = BEIDE(T("EverDrive-Menü - der Monitor startet beim Spielstart von selbst")); break;
+        case 3: edStatus_ = BEIDE(T("Konsole aus")); break;
+        default:
+            edStatus_ = autoPause_ ? BEIDE(T("Monitor angehalten - startet beim nächsten Spiel von selbst"))
+                      : laeuft    ? BEIDE(T("Spiel läuft - Monitor startet..."))
+                                  : BEIDE(T("Spiel startet - warte, bis es läuft..."));
+            break;
+    }
+    if (z == 2 && laeuft && !autoPause_ && jetzt - spielSeitMs_ >= 2500) {
+        onToggleMonitor();
+        // Kein Set / Erkennung gescheitert: fuer dieses Spiel nicht staendig neu
+        // erkennen (der Hash belastet die Konsole), erst beim naechsten Spiel.
+        // (Laeuft die Erkennung ueber die SD-Karte noch, entscheidet ihr Ende.)
+        if (!monitoring_ && sdErk_ != 1) {
+            autoPause_ = true;
+            edStatus_ = BEIDE(T("Monitor angehalten - startet beim nächsten Spiel von selbst"));
+        }
+    }
 }
 
 void App::playUnlockSound() {
@@ -1209,6 +1975,18 @@ void App::Frage(const std::string& titel, const std::string& text, std::function
     dialoge_.push_back(std::move(d));
 }
 
+void App::Bestaetigen(const std::string& titel, const std::string& text, std::vector<std::string> liste,
+                      std::function<void()> ok) {
+    Dialog d;
+    d.art = Dialog::Art::Bestaetigen;
+    d.titel = titel;
+    d.text = text;
+    d.liste = std::move(liste);
+    d.ja = std::move(ok);
+    d.nummer = ++dialogNummer_;
+    dialoge_.push_back(std::move(d));
+}
+
 namespace {
 
 // Knoepfe mittig nebeneinander (QDialogButtonBox mit setCenterButtons).
@@ -1280,6 +2058,41 @@ void Unterstrich(float s) {
 static constexpr const char* kKatzeInnen = "###katze_innen";
 static constexpr const char* kKatzeDirekt = "###katze_direkt";
 
+// Waehrend die SD-Karte ueber USB gelesen oder beschrieben wird: kleines
+// Fenster in der Mitte mit pulsierendem "Bitte warten" und Fortschritt.
+void App::ZeichneWarten() {
+    const bool aktiv = usbEinrichtungLaeuft_;
+    if (aktiv && !usbWarAktiv_) { usbZaehler_ = 0; usbGesamt_ = 0; usbSeitMs_ = JetztMs(); }
+    usbWarAktiv_ = aktiv;
+    // Erst ab 3 s - kurze Zugriffe sollen nicht aufblitzen.
+    if (!aktiv || !dialoge_.empty() || JetztMs() - usbSeitMs_ < 3000) return;
+    const float s = dpi_;
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * s, 16 * s));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8 * s);
+    const ImGuiWindowFlags fl = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+    if (ImGui::Begin("##usbwarten", nullptr, fl)) {
+        const float puls = 0.55f + 0.45f * std::sin((float)ImGui::GetTime() * 4.0f);
+        ImVec4 farbe = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+        farbe.w = puls;
+        ImGui::PushStyleColor(ImGuiCol_Text, farbe);
+        ImGui::TextUnformatted(T("Bitte warten ..."));
+        ImGui::PopStyleColor();
+        ImGui::TextUnformatted(T("Das Tool arbeitet über USB mit der SD-Karte."));
+        const int n = usbZaehler_, g = usbGesamt_;
+        if (g > 0) {
+            ImGui::ProgressBar((float)n / (float)g, ImVec2(300 * s, 0),
+                               Fmt(T("%1 von %2 Ordnern"), {Zahl((long long)n), Zahl((long long)g)}).c_str());
+        } else if (n > 0) {
+            ImGui::TextUnformatted(Fmt(T("%1 Ordner gelesen"), {Zahl((long long)n)}).c_str());
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+}
+
 void App::ZeichneDialog() {
     if (dialoge_.empty()) return;
     Dialog& d = dialoge_.front();
@@ -1299,7 +2112,7 @@ void App::ZeichneDialog() {
     if (!d.geoeffnet) {
         ImGui::OpenPopup(titel.c_str());
         d.geoeffnet = true;
-        if (d.art == Dialog::Art::Optionen) d.sprache = i18n::Sprache();
+        if (d.art == Dialog::Art::Optionen) { d.sprache = i18n::Sprache(); d.popupImSpiel = settings_.popup_in_game; }
     }
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14 * s, 12 * s));
@@ -1332,6 +2145,23 @@ void App::ZeichneDialog() {
                         schliessen = true;
                     }
                 }
+                break;
+            }
+            case Dialog::Art::Bestaetigen: {
+                // Text, Liste im Rollbereich, OK/Abbrechen. Escape = Abbrechen.
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 440 * s);
+                ImGui::TextUnformatted(d.text.c_str());
+                ImGui::PopTextWrapPos();
+                ImGui::Dummy(ImVec2(0, 4 * s));
+                const float zeile = ImGui::GetTextLineHeightWithSpacing();
+                const float h = std::min(260 * s, zeile * (float)d.liste.size() + 8 * s);
+                ImGui::BeginChild("##liste", ImVec2(440 * s, h), ImGuiChildFlags_Borders);
+                for (const std::string& z : d.liste) ImGui::TextUnformatted(z.c_str());
+                ImGui::EndChild();
+                ImGui::Dummy(ImVec2(0, 8 * s));
+                const int r = Knoepfe(s, "OK", "Cancel");
+                if (r == 1) { danach = d.ja; schliessen = true; }
+                if (r == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) schliessen = true;
                 break;
             }
             case Dialog::Art::Nachricht: {
@@ -1376,6 +2206,9 @@ void App::ZeichneDialog() {
                         ImGui::EndCombo();
                     }
                 }
+                ImGui::Checkbox(T("Achievement-Einblendung im Spiel"), &d.popupImSpiel);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("Zeigt freigeschaltete Achievements direkt auf dem Fernseher an. Das Spiel hält dafür etwa 3 Sekunden an und läuft danach von selbst weiter (Mega EverDrive CORE)."));
                 ImGui::Dummy(ImVec2(0, 2 * s));
 
                 const float breit = std::max(300 * s, ImGui::GetContentRegionAvail().x);
@@ -1389,13 +2222,13 @@ void App::ZeichneDialog() {
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Öffnet die Fehlerliste auf GitHub im Browser."));
 
                 bool wiederherstellen = false;
-                if (ImGui::Button(T("Original-Mapper wiederherstellen"), ImVec2(breit, 0))) {
+                if (ImGui::Button(T("Mapper wiederherstellen"), ImVec2(breit, 0))) {
                     wiederherstellen = true;
                     speichern = true;      // dlg.accept()
                 }
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", T("Schreibt die beim Einrichten gesicherten Originaldateien "
-                                              "auf die SD-Karte zurück."));
+                    ImGui::SetTooltip("%s", T("Entfernt MEGA-RAW von der SD-Karte und schreibt die Kerne "
+                                              "zurück, die vorher dort lagen."));
 
                 if (ImGui::Button(T("über die Katze"), ImVec2(breit, 0))) ImGui::OpenPopup(kKatzeInnen);
                 ZeichneKatze(kKatzeInnen);
@@ -1405,6 +2238,7 @@ void App::ZeichneDialog() {
                     // Den Neustart-Hinweis der Qt-Fassung braucht es deshalb nicht.
                     i18n::SpracheSetzen(d.sprache);
                     settings_.language = i18n::Sprache();
+                    settings_.popup_in_game = d.popupImSpiel;   // wirkt beim naechsten Monitorstart
                     settings_.save(settingsPath_);
                     rebuildAcList();   // Zusaetze an den Achievements in der neuen Sprache
                     schliessen = true;
@@ -1446,12 +2280,12 @@ void App::ZeichneDialog() {
                     ImGui::Dummy(ImVec2(0, 6 * s));
                     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 440 * s);
                     ImGui::TextUnformatted(T("Damit Achievements funktionieren, müssen die Mapper-Dateien einmalig "
-                                             "auf die SD-Karte des EverDrive (mega-core.x25 für das CORE, "
-                                             "mega-pro.rbf für das PRO).\n\n"
-                                             "1. SD-Karte aus der Konsole nehmen\n"
-                                             "2. In den Kartenleser am Computer stecken\n"
-                                             "3. Im nächsten Fenster die Karte auswählen\n\n"
-                                             "Den Rest erledigt das Programm."));
+                                             "auf die SD-Karte des EverDrive.\n\n"
+                                             "1. Konsole einschalten und im EverDrive-Menü lassen\n"
+                                             "2. EverDrive per USB mit dem Computer verbinden\n"
+                                             "3. \"Mapper jetzt einrichten\" klicken\n\n"
+                                             "Den Rest erledigt das Programm. Ohne USB-Verbindung fragt es "
+                                             "nach der SD-Karte im Kartenleser."));
                     ImGui::PopTextWrapPos();
                     ImGui::Dummy(ImVec2(0, 8 * s));
                     if (knopf(T("Mapper jetzt einrichten"))) {
@@ -1689,6 +2523,211 @@ void App::ZeichneLog(float hoehe) {
         ImGui::SetClipboardText(alles.c_str());
         logKopiertZeit_ = ImGui::GetTime();
     }
+    // Nur Test (test.ini popuptest=1): Einblendung von Hand ausloesen
+    if (monWorker_ && monWorker_->popupTestErlaubt()) {
+        ImGui::SameLine();
+        if (ImGui::Button("Popup testen###popuptest")) monWorker_->popupTest();
+    }
+    // Nur Test (test.ini sdtest=1): SD-Karte ueber USB beschreiben und pruefen
+    if (sdTestErlaubt_ < 0) {
+        const std::string ini = LeseDatei(plattform::ExeOrdner() + "/test.ini");
+        std::string k;
+        for (char c : ini) if (c != ' ' && c != '\t' && c != '\r') k.push_back((char)::tolower((unsigned char)c));
+        sdTestErlaubt_ = k.find("\nsdtest=1") != std::string::npos || k.rfind("sdtest=1", 0) == 0 ? 1 : 0;
+    }
+    if (sdTestErlaubt_ == 1) {
+        ImGui::SameLine();
+        ImGui::BeginDisabled(sdTestLaeuft_ || monitoring_);
+        if (ImGui::Button("SD per USB testen###sdtest")) sdTestUsb();
+        ImGui::SameLine();
+        if (ImGui::Button("SD aufräumen###sdauf")) sdAufraeumenUsb();
+        ImGui::EndDisabled();
+    }
+}
+
+// Messbau: Datei- und Ordnerbefehle ueber USB (ohne Laufwerk). Schreibt den
+// Kern in einen Testordner, liest ihn zurueck, vergleicht, misst die Zeit und
+// raeumt wieder auf. Nur bei gestopptem Monitor (Anschluss ist exklusiv).
+void App::sdTestUsb() {
+    if (sdTestLaeuft_.exchange(true)) return;
+    const std::vector<uint8_t> kern = coreDaten();
+    std::thread([this, kern]() {
+        auto L = [this](const std::string& s) { appendLog("TEST SD: " + s); };
+        auto ms = [](std::chrono::steady_clock::time_point t0) {
+            return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - t0).count();
+        };
+        auto code = [](int c) {
+            return c == 0 ? std::string("ok") : c < 0 ? "keine Antwort (" + std::to_string(c) + ")"
+                                                      : "Fehler " + std::to_string(c);
+        };
+        std::vector<std::string> versuche;
+        auto [ed, port] = find_everdrive(std::string(), &versuche);
+        if (!ed) {
+            L("kein EverDrive gefunden");
+            for (const auto& v : versuche) L("  " + v);
+            sdTestLaeuft_ = false;
+            return;
+        }
+        L("verbunden mit " + port + ", Kern " + std::to_string(kern.size()) + " Byte");
+        try {
+            const uint8_t b = ed->memrd(mdsnoop::kAddrSnoop + mdsnoop::kCtlOffset, 1)[0];
+            L(b > 0 && b < 0xFF ? "laeuft: Spiel mit unserem Kern " + std::to_string(b)
+                                : "laeuft: EverDrive-Menue oder fremder Kern (Build-Byte " + std::to_string(b) + ")");
+        } catch (...) { L("Build-Byte nicht lesbar"); }
+
+        auto t0 = std::chrono::steady_clock::now();
+        std::vector<EdSerial::Eintrag> liste;
+        int c = ed->ordnerListe("/", liste);
+        L("Wurzel lesen: " + code(c) + ", " + std::to_string(liste.size()) + " Eintraege, " +
+          std::to_string(ms(t0)) + " ms");
+        if (c < 0) { L("abgebrochen (Antwort fehlt - ggf. USB-Kabel ab/an)"); sdTestLaeuft_ = false; return; }
+        for (size_t i = 0; i < liste.size() && i < 40; ++i)
+            L(std::string("  ") + (liste[i].ordner ? "[D] " : "    ") + liste[i].name +
+              (liste[i].ordner ? "" : " (" + std::to_string(liste[i].groesse) + ")"));
+
+        t0 = std::chrono::steady_clock::now();
+        c = ed->ordnerListe("ROMS", liste);
+        int ordner = 0;
+        for (const auto& e : liste) if (e.ordner) ++ordner;
+        L("ROMS lesen: " + code(c) + ", " + std::to_string(liste.size()) + " Eintraege, davon " +
+          std::to_string(ordner) + " Ordner, " + std::to_string(ms(t0)) + " ms");
+
+        // Inhalt der Sicherung mit Groessen (welche Kerne liegen dort?).
+        {
+            std::vector<std::pair<std::string, int>> offen{{kBackupDir, 0}};
+            while (!offen.empty()) {
+                const auto [pfad, tiefe] = offen.back();
+                offen.pop_back();
+                std::vector<EdSerial::Eintrag> b;
+                if (ed->ordnerListe(pfad, b) != 0) continue;
+                for (const auto& e : b) {
+                    if (e.ordner) { if (tiefe < 9) offen.push_back({pfad + "/" + e.name, tiefe + 1}); continue; }
+                    L("Sicherung: " + pfad + "/" + e.name + " (" + std::to_string(e.groesse) + " Byte" +
+                      (UsbEigenerKern(e.groesse, {kern.size(), proDaten().size()}) ? ", MEGA-RAW" : ", unbekannt") + ")");
+                }
+            }
+        }
+
+        const std::string dir = "MEGA-RAW-TEST";
+        const std::string datei = dir + "/mega-core.x25";
+        c = ed->ordnerAnlegen(dir);
+        L("Ordner anlegen: " + code(c) + (c == 8 ? " (gab es schon)" : ""));
+
+        t0 = std::chrono::steady_clock::now();
+        c = ed->dateiSchreiben(datei, kern);
+        const long long tw = ms(t0);
+        L("schreiben: " + code(c) + ", " + std::to_string(tw) + " ms");
+
+        EdSerial::Eintrag info;
+        c = ed->dateiInfo(datei, info);
+        L("Dateiinfo: " + code(c) + ", Groesse " + std::to_string(info.groesse) +
+          (info.groesse == kern.size() ? " (stimmt)" : " (FALSCH)"));
+
+        Bytes zurueck;
+        t0 = std::chrono::steady_clock::now();
+        c = ed->dateiLesen(datei, (uint32_t)kern.size(), zurueck);
+        const long long tr = ms(t0);
+        L("zuruecklesen: " + code(c) + ", " + std::to_string(tr) + " ms, Inhalt " +
+          (zurueck == kern ? "GLEICH" : "ABWEICHEND (" + std::to_string(zurueck.size()) + " Byte)"));
+
+        c = ed->loeschen(datei);
+        L("Datei loeschen: " + code(c));
+        c = ed->loeschen(dir);
+        L("Ordner loeschen: " + code(c));
+        L("fertig");
+        ed->close();
+        sdTestLaeuft_ = false;
+    }).detach();
+}
+
+// Testknopf: raeumt die Entwicklerkarte auf - alte Speicherstaende der
+// geteilten Slots in der Wurzel (rawslotN.sst/.dat, seit 04.09.2026 unbenutzt),
+// rawtest.txt, MEGA-RAW-TEST und gesicherte alte MEGA-RAW-Kerne in der
+// Sicherung (keine Originale). Nur im EverDrive-Menue, Liste + OK.
+void App::sdAufraeumenUsb() {
+    if (monitoring_ || usbEinrichtungLaeuft_.exchange(true)) return;
+    const std::vector<size_t> aktuell = {coreDaten().size(), proDaten().size()};
+    std::thread([this, aktuell]() {
+        auto L = [this](const std::string& s) { appendLog("TEST AUFRAEUMEN: " + s); };
+        auto [ed, port] = find_everdrive();
+        if (!ed) { L("kein EverDrive gefunden"); usbEinrichtungLaeuft_ = false; return; }
+        if (UsbSpielLaeuft(*ed)) {
+            L("es laeuft ein Spiel - bitte Reset (EverDrive-Menue)");
+            ed->close(); usbEinrichtungLaeuft_ = false; return;
+        }
+        std::vector<std::string> dateien, ordner;   // ordner: tiefste zuerst loeschen
+        bool fehler = false;
+        std::vector<EdSerial::Eintrag> l;
+        if (ed->ordnerListe("/", l) < 0) fehler = true;
+        for (const auto& e : l) {
+            const std::string n = Kleinschrift(e.name);
+            const bool slot = n.rfind("rawslot", 0) == 0 &&
+                              (UsbEndung(n) == ".sst" || UsbEndung(n) == ".dat");
+            if (!e.ordner && (slot || n == "rawtest.txt")) dateien.push_back(e.name);
+            if (e.ordner && n == "mega-raw-test") {
+                std::vector<EdSerial::Eintrag> t;
+                if (ed->ordnerListe(e.name, t) == 0)
+                    for (const auto& x : t) if (!x.ordner) dateien.push_back(e.name + "/" + x.name);
+                ordner.push_back(e.name);
+            }
+        }
+        // Sicherung: alte MEGA-RAW-Kerne entfernen, leere Ordner danach.
+        std::vector<std::pair<std::string, int>> offen{{kBackupDir, 0}};
+        std::vector<std::string> bakOrdner;
+        while (!fehler && !offen.empty()) {
+            const auto [pfad, tiefe] = offen.back();
+            offen.pop_back();
+            std::vector<EdSerial::Eintrag> b;
+            const int c = ed->ordnerListe(pfad, b);
+            if (c < 0) { fehler = true; break; }
+            if (c != 0) continue;
+            bakOrdner.push_back(pfad);
+            for (const auto& e : b) {
+                if (e.ordner) { if (tiefe < 9) offen.push_back({pfad + "/" + e.name, tiefe + 1}); continue; }
+                const std::string n = Kleinschrift(e.name);
+                if ((n == kKernNamen[0] || n == kKernNamen[1]) && UsbEigenerKern(e.groesse, aktuell))
+                    dateien.push_back(pfad + "/" + e.name);
+            }
+        }
+        ed->close();
+        usbEinrichtungLaeuft_ = false;
+        // Tiefste Ordner zuerst; nicht leere bleiben beim Loeschen einfach stehen.
+        std::sort(bakOrdner.begin(), bakOrdner.end(), [](const std::string& a, const std::string& b) {
+            return std::count(a.begin(), a.end(), '/') > std::count(b.begin(), b.end(), '/');
+        });
+        ordner.insert(ordner.end(), bakOrdner.begin(), bakOrdner.end());
+        if (fehler) { L("Karte nicht vollstaendig lesbar - nichts geaendert"); return; }
+        if (dateien.empty()) { L("nichts aufzuraeumen"); return; }
+        Post([this, dateien, ordner]() {
+            std::vector<std::string> anzeige;
+            for (const auto& d : dateien) anzeige.push_back("/" + d);
+            Bestaetigen("SD aufräumen",
+                        "Diese " + Zahl((long long)dateien.size()) +
+                            " Dateien werden gelöscht: alte Speicherstände der geteilten Slots, Testdateien "
+                            "und gesicherte alte MEGA-RAW-Kerne (keine Originale). Danach werden leere "
+                            "Ordner der Sicherung entfernt.\n\nMit OK geht es los.",
+                        anzeige, [this, dateien, ordner]() {
+                            if (usbEinrichtungLaeuft_.exchange(true)) return;
+                            std::thread([this, dateien, ordner]() {
+                                auto L = [this](const std::string& s) { appendLog("TEST AUFRAEUMEN: " + s); };
+                                auto [ed, port] = find_everdrive();
+                                if (!ed || UsbSpielLaeuft(*ed)) {
+                                    L("abgebrochen (keine Verbindung oder Spiel laeuft)");
+                                    usbEinrichtungLaeuft_ = false;
+                                    return;
+                                }
+                                int weg = 0, fehl = 0, ow = 0;
+                                for (const auto& d : dateien) { if (ed->loeschen(d) == 0) ++weg; else ++fehl; }
+                                for (const auto& o : ordner) if (ed->loeschen(o) == 0) ++ow;
+                                ed->close();
+                                L(std::to_string(weg) + " Dateien geloescht, " + std::to_string(fehl) +
+                                  " fehlgeschlagen, " + std::to_string(ow) + " leere Ordner entfernt");
+                                usbEinrichtungLaeuft_ = false;
+                            }).detach();
+                        });
+        });
+    }).detach();
 }
 
 void App::Zeichnen(ImVec2 pos, ImVec2 groesse) {
@@ -1701,6 +2740,7 @@ void App::Zeichnen(ImVec2 pos, ImVec2 groesse) {
         }
         for (auto& f : q) f();
     }
+    autoStartPruefen();
     // Fertig geladene Badges als Textur hochladen (nur hier: OpenGL-Thread).
     {
         std::vector<BadgeErgebnis> fertig;
@@ -1843,7 +2883,11 @@ void App::Zeichnen(ImVec2 pos, ImVec2 groesse) {
     {
         const float innen = ImGui::GetContentRegionAvail().x - 9 * s;
         const float x0 = ImGui::GetCursorPosX();
-        const std::string lbl = OhneMnemonik(T(monitoring_ ? "Monitor stoppen" : "Verbinden && Monitor starten"));
+        // Wie RAW-NES: Grundzustand verbindet und erkennt in einem Schritt;
+        // nach einem Stopp von Hand, solange dasselbe Spiel laeuft: fortsetzen.
+        const std::string lbl = T(monitoring_ ? "■ Monitor stoppen"
+                                  : (autoPause_ && leerlauf_ == 2) ? "Monitor fortsetzen"
+                                                                   : "Spiel erkennen & Monitor starten");
         const float bw = ImGui::CalcTextSize(lbl.c_str()).x + 2 * ImGui::GetStyle().FramePadding.x + 16 * s;
         // Lange Statustexte brechen links vom Knopf um, statt ihn hinauszuschieben.
         const ImVec2 start = ImGui::GetCursorPos();
@@ -1896,6 +2940,7 @@ void App::Zeichnen(ImVec2 pos, ImVec2 groesse) {
     ImGui::End();
     ImGui::PopStyleVar(2);
 
+    ZeichneWarten();
     ZeichneDialog();
     if (katzeDirekt_) { ImGui::OpenPopup(kKatzeDirekt); katzeDirekt_ = false; }
     ZeichneKatze(kKatzeDirekt);

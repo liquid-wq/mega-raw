@@ -36,6 +36,10 @@ endforeach()
 
 set(ASSETS_DIR "${CMAKE_SOURCE_DIR}/assets")
 configure_file(src/app.rc.in "${CMAKE_BINARY_DIR}/erzeugt/app.rc" @ONLY)
+# Ninja sieht die eingebetteten Dateien sonst nicht: ein neuer Kern muss die
+# Ressource neu uebersetzen.
+set_source_files_properties("${CMAKE_BINARY_DIR}/erzeugt/app.rc" PROPERTIES
+    OBJECT_DEPENDS "${ASSETS_DIR}/mega-core.x25;${ASSETS_DIR}/mega-pro.rbf;${ASSETS_DIR}/app.ico;${ASSETS_DIR}/jason_pixel.png")
 
 set(IMGUI_SOURCES
     "${IMGUI_DIR}/imgui.cpp"
@@ -47,6 +51,14 @@ set(IMGUI_SOURCES
     # "OpenGL 1.1.0 / GDI Generic", dort stuerzt die OpenGL3-Anbindung ab.
     "${IMGUI_DIR}/backends/imgui_impl_opengl2.cpp"
 )
+
+# Erweiterungen des Kopierprogramms: eigene, nicht veroeffentlichte Datei;
+# fehlt sie, wird der Platzhalter gebaut (Programm ohne Erweiterung).
+if(EXISTS "${CMAKE_SOURCE_DIR}/src/zusatz/popup.cpp")
+    set(ZUSATZ_SOURCE src/zusatz/popup.cpp)
+else()
+    set(ZUSATZ_SOURCE src/zusatz/zusatz_leer.cpp)
+endif()
 
 set(CORE_SOURCES
     src/core/ra_engine.cpp
@@ -76,6 +88,7 @@ add_executable(mega_raw WIN32
     src/archiv.cpp
     src/plattform.cpp
     ${CORE_SOURCES}
+    ${ZUSATZ_SOURCE}
     "${MINIZ_DIR}/miniz.c"
     ${IMGUI_SOURCES}
 )
@@ -83,6 +96,7 @@ add_executable(mega_raw WIN32
 target_include_directories(mega_raw PRIVATE
     src
     src/core
+    src/zusatz
     "${IMGUI_DIR}"
     "${IMGUI_DIR}/backends"
     "${MINIZ_DIR}"

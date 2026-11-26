@@ -1,59 +1,45 @@
 # MEGA-RAW
 
-**RetroAchievements on real Mega Drive hardware — no emulator, no ROM patch.**
+**RetroAchievements on the original Mega Drive — no emulator, no ROM patch.**
 
-MEGA-RAW connects a physical Mega Drive, a Mega EverDrive CORE and
-RetroAchievements.
-A custom FPGA core on the EverDrive identifies the cartridge by itself and
-brings its own in-game save state menu along.
+One of four tools for RetroAchievements on real hardware:
+NES · Super Nintendo · Mega Drive · Saturn → [all projects](https://liquid-wq.github.io/)
+
+MEGA-RAW brings RetroAchievements to the original Mega Drive console. The game
+runs on the real console, the Mega EverDrive simply takes the place of the
+cartridge. A custom FPGA core on the EverDrive identifies the game by itself,
+shows your achievements right on the TV and brings its own in-game save state
+menu along.
 
 **Project page: https://liquid-wq.github.io/mega-raw/**
 
-![An achievement unlocking while the game runs on the console](docs/megaraw_unlock.gif)
+![An achievement popping up on the TV while the game runs](docs/megaraw_popup.gif)
 
-*An achievement unlocking on real hardware.*
+*An achievement popping up on the console's own picture.*
 
 ![Detecting the running cartridge](docs/megaraw_uebersicht.gif)
 
-*Log in, and the cartridge in the console identifies itself.*
+*Log in, start a game, and it identifies itself.*
 
 *Deutsche Fassung weiter unten.*
 
 ---
 
-## What's new in 2.0.0
+## What's new in 2.1.0
 
-* **One program file.** No installation, no Qt libraries. The FPGA cores for
-  CORE and PRO are built in and are put onto the SD card from inside the
-  program.
-* **First-run setup.** On the first start MEGA-RAW asks for your language and
-  offers to set up the SD card.
-* **Clear status messages.** If something is missing, MEGA-RAW tells you
-  whether it is the USB cable, the console or the game, and what to do next.
-* **Stops by itself.** If the console is switched off while monitoring, the
-  monitor stops and the achievement list is cleared.
-* **Seven languages:** English, German, Spanish, Portuguese (Brazil), French,
-  Italian, Polish.
-* **Copy log** button for bug reports.
+**The highlight: your achievements now appear right in the game.** No more looking at the PC
+or the tool while you play.
 
-## Two builds
-
-| | FPGA *(recommended)* | Legacy *(patched)* |
-|---|---|---|
-| ROM stays untouched | yes | no, an IPS patch is applied |
-| Game detection | automatic, from the cartridge | manual file selection |
-| Hook database needed | no | yes |
-| 2 MB size limit | no | yes |
-| In-game save state menu | yes, its own | the EverDrive's own |
-| Hardcore mode | planned, see below | no |
-| Games prepared | any Mega Drive cartridge | 602 patched titles |
-
-The FPGA build replaces the cartridge mapper with a custom core. Nothing is
-patched, nothing is injected, and no per-game hook database has to be maintained.
-
-The legacy build patches a small routine into the ROM that reports values the PC
-reads over USB. It still works and stays available, but new work goes into the
-FPGA build.
+* **Achievement popup in the game.** When you unlock an achievement, a banner
+  with its title flies in on the console's own picture. The game holds for about
+  three seconds and then carries on by itself. The popup waits for a calm
+  moment, so it does not interrupt a jump. If you'd rather not have it, you can
+  turn it off under Options → "Achievement popup in the game".
+* **Starts by itself.** Connect the EverDrive, start a game, and MEGA-RAW
+  detects it and starts monitoring. No button to press.
+* **SD card setup over USB.** The SD card stays in the EverDrive. MEGA-RAW
+  finds the right folders by itself, shows them for confirmation and only
+  touches folders where the core is missing or outdated.
 
 ## How it works
 
@@ -63,28 +49,31 @@ over USB, and MEGA-RAW checks the RetroAchievements conditions there.
 
 - **Nothing is patched.** The game runs unmodified, and nothing is written
   back into it.
-- **Automatic detection.** The cartridge is recognised by itself, no ROM
-  folder and no manual selection needed.
+- **Automatic detection.** The game is recognised by itself, no ROM folder and
+  no manual selection needed.
+- **Achievement popup** on the TV, in the same look in every game.
 - **Save state menu** — replacing the cartridge mapper normally costs you the
   EverDrive's in-game menu. MEGA-RAW brings its own along instead, built from
-  scratch: it saves the complete state
-  of the console and puts it back exactly as it was. Start + Down opens it over
-  the running game: CONTINUE, SAVE, LOAD, EXIT. Four slots per game, stored as
-  files on the SD card, so they survive switching the console off.
+  scratch: it saves the complete state of the console and puts it back exactly
+  as it was. Start + Down opens it over the running game: CONTINUE, SAVE, LOAD,
+  EXIT. Four slots per game, stored as files on the SD card, so they survive
+  switching the console off.
 
 ### Known limits
 
-A few games cannot open the menu, and sound is not part of a save state.
+A few games cannot open the menu or show the popup; achievements still work
+there. Sound is not part of a save state.
 
-Some games use the Start button themselves. If **Continue** does not react in the
-menu, confirm with **C** instead.
+Some games use the Start button themselves. If **Continue** does not react in
+the menu, confirm with **C** instead.
 
 ## Requirements
 
 - Mega EverDrive CORE (Krikzz) — this is what MEGA-RAW is developed and tested on.
-- Mega EverDrive PRO — experimental support since 1.3.0. Achievements work there
-  according to tester feedback, the in-game menu does not work on the PRO yet.
-  Feedback is welcome as a [GitHub Issue](https://github.com/liquid-wq/mega-raw/issues).
+- Mega EverDrive PRO — experimental. Achievements work there according to
+  tester feedback; the in-game menu and the popup are not available on the PRO
+  yet. Feedback is welcome as a
+  [GitHub Issue](https://github.com/liquid-wq/mega-raw/issues).
 - Other models are untested.
 - Original Mega Drive / Genesis hardware
 - USB connection between EverDrive and PC
@@ -95,14 +84,17 @@ menu, confirm with **C** instead.
 
 1. Download the latest release, unpack it and start `mega-raw.exe`.
 2. The first-run setup asks for your language and offers **Set up mapper on SD
-   card**. Point it at your SD card. The custom cores for both devices (CORE
-   and PRO) are copied to every location the console loads from; each device
-   picks its own file. This can also be done later from the main window.
+   card**. Switch the console on, leave it in the EverDrive menu and connect
+   the EverDrive by USB. MEGA-RAW then sets up the SD card by itself. Without a
+   USB connection it asks for the SD card in a card reader instead. This can
+   also be done later from the main window.
 3. Log in with your RetroAchievements account. With **Stay logged in** the
    program signs you in by itself next time; your password is not stored.
-4. Put the card back into the console, connect the EverDrive by USB and start
-   a game.
-5. Press **Connect & start monitor**. The game is detected automatically.
+4. Start a game from the EverDrive menu. MEGA-RAW detects it and starts
+   monitoring.
+
+**Updating from 2.0.0:** start the new `mega-raw.exe` and run **Set up mapper
+on SD card** once. The popup needs the new core on the SD card.
 
 ## Hardcore mode
 
@@ -116,6 +108,12 @@ The groundwork is already in place: MEGA-RAW checks your setup before and during
 a session. If the EverDrive's in-game menu or cheats are enabled, it says so and
 stays in Softcore.
 
+## Older versions
+
+The Qt version (1.x) and the first version from July 2026, which worked with
+patched ROMs, are kept in the `legacy` folder and in the older releases. They
+are no longer developed.
+
 ## License
 
 MEGA-RAW is free to use. The source is public to read and audit, but it is not
@@ -123,15 +121,6 @@ open source — see [LICENSE](LICENSE).
 
 Third-party components are listed in
 [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
-
-## Repository layout
-
-| Folder | Contents |
-|---|---|
-| `src/`, `assets/` | MEGA-RAW 2.0.0 (current) |
-| `legacy/qt/` | the FPGA build, Qt version 1.x |
-| `legacy/cpp/` | the patched build, C++ port |
-| `legacy/python/` | the patched build, original Python version |
 
 ## Related
 
@@ -146,49 +135,35 @@ Built by [Liqui](https://github.com/liquid-wq).
 
 # MEGA-RAW (deutsch)
 
-**RetroAchievements auf echter Mega-Drive-Hardware — kein Emulator, kein
+**RetroAchievements auf dem originalen Mega Drive — kein Emulator, kein
 ROM-Patch.**
 
-MEGA-RAW verbindet ein echtes Mega Drive, ein Mega EverDrive CORE und
-RetroAchievements. Ein eigener FPGA-Kern auf dem EverDrive erkennt die Kassette selbst und bringt
-ein eigenes Ingame-Menü für Speicherstände mit.
+Eines von vier Werkzeugen für RetroAchievements auf echter Hardware:
+NES · Super Nintendo · Mega Drive · Saturn → [alle Projekte](https://liquid-wq.github.io/)
+
+MEGA-RAW bringt RetroAchievements auf die originale Mega-Drive-Konsole. Das
+Spiel läuft auf der echten Konsole, das Mega EverDrive nimmt einfach den Platz
+der Kassette ein. Ein eigener FPGA-Kern auf dem EverDrive erkennt das Spiel
+selbst, zeigt Achievements direkt im Fernsehbild und bringt ein eigenes
+Ingame-Menü für Speicherstände mit.
 
 **Projektseite: https://liquid-wq.github.io/mega-raw/**
 
-## Neu in 2.0.0
+## Neu in 2.1.0
 
-* **Eine einzige Programmdatei.** Keine Installation, keine Qt-Bibliotheken.
-  Die FPGA-Kerne für CORE und PRO sind eingebaut und werden aus dem Programm
-  heraus auf die SD-Karte gebracht.
-* **Ersteinrichtung.** Beim ersten Start fragt MEGA-RAW nach der Sprache und
-  bietet an, die SD-Karte einzurichten.
-* **Klare Statusmeldungen.** Fehlt etwas, sagt MEGA-RAW, ob es am USB-Kabel,
-  an der Konsole oder am Spiel liegt und was zu tun ist.
-* **Stoppt von selbst.** Wird die Konsole während der Überwachung
-  ausgeschaltet, stoppt der Monitor und die Achievement-Liste wird geleert.
-* **Sieben Sprachen:** Englisch, Deutsch, Spanisch, Portugiesisch (Brasilien),
-  Französisch, Italienisch, Polnisch.
-* Knopf **Log kopieren** für Fehlermeldungen.
+**Das Highlight: Deine Achievements erscheinen jetzt direkt im Spiel.** Kein Blick mehr auf
+den PC oder das Tool nötig, während du spielst.
 
-## Zwei Fassungen
-
-| | FPGA *(empfohlen)* | Klassisch *(gepatcht)* |
-|---|---|---|
-| ROM bleibt unverändert | ja | nein, es wird ein IPS-Patch angewendet |
-| Spielerkennung | automatisch, aus der Kassette | Datei von Hand wählen |
-| Hook-Datenbank nötig | nein | ja |
-| 2-MB-Grenze | nein | ja |
-| Ingame-Menü für Speicherstände | ja, ein eigenes | das des EverDrive |
-| Hardcore-Modus | geplant, siehe unten | nein |
-| Vorbereitete Spiele | jede Mega-Drive-Kassette | 602 gepatchte Titel |
-
-Die FPGA-Fassung ersetzt den Kassetten-Mapper durch einen eigenen Kern. Es wird
-nichts gepatcht, nichts eingeschleust, und es muss keine Hook-Datenbank gepflegt
-werden.
-
-Die klassische Fassung patcht eine kleine Routine ins ROM, die Werte meldet, die
-der PC über USB liest. Sie funktioniert weiterhin und bleibt verfügbar, neue
-Arbeit fließt aber in die FPGA-Fassung.
+* **Achievement-Popup im Spiel.** Bei einer Freischaltung fliegt ein Banner
+  mit dem Titel ins Bild der Konsole. Das Spiel hält dafür etwa drei Sekunden
+  an und läuft dann von selbst weiter. Das Popup wartet auf einen ruhigen
+  Moment und unterbricht keinen Sprung. Wer es nicht möchte, kann es unter
+  Optionen → „Achievement-Einblendung im Spiel" abschalten.
+* **Startet von selbst.** EverDrive anschließen, Spiel starten – MEGA-RAW
+  erkennt es und startet die Überwachung. Kein Knopfdruck nötig.
+* **SD-Karte über USB einrichten.** Die Karte bleibt im EverDrive. MEGA-RAW
+  findet die richtigen Ordner selbst, zeigt sie zur Bestätigung und ändert nur
+  Ordner, in denen der Kern fehlt oder veraltet ist.
 
 ## Wie es funktioniert
 
@@ -199,30 +174,32 @@ RetroAchievements.
 
 - **Nichts wird gepatcht.** Das Spiel läuft unverändert, und es wird nichts
   hineingeschrieben.
-- **Automatische Erkennung.** Die Kassette wird von selbst erkannt, kein
+- **Automatische Erkennung.** Das Spiel wird von selbst erkannt, kein
   ROM-Ordner und keine Auswahl von Hand nötig.
+- **Achievement-Popup** im Fernsehbild, in jedem Spiel gleich.
 - **Speicherstand-Menü** — wer den Kassetten-Mapper ersetzt, verliert damit
   normalerweise das Ingame-Menü des EverDrive. MEGA-RAW bringt deshalb ein
-  eigenes mit, komplett
-  selbst gebaut: Es sichert den vollständigen Zustand der Konsole und stellt ihn
-  exakt wieder her. Start + Runter öffnet es über dem laufenden Spiel: CONTINUE,
-  SAVE, LOAD, EXIT. Vier Slots je Spiel, als Dateien auf der SD-Karte, sie
-  überleben also das Ausschalten.
+  eigenes mit, komplett selbst gebaut: Es sichert den vollständigen Zustand der
+  Konsole und stellt ihn exakt wieder her. Start + Runter öffnet es über dem
+  laufenden Spiel: CONTINUE, SAVE, LOAD, EXIT. Vier Slots je Spiel, als Dateien
+  auf der SD-Karte, sie überleben also das Ausschalten.
 
 ### Bekannte Einschränkungen
 
-Bei einigen wenigen Spielen lässt sich das Menü nicht öffnen, und der Ton ist
-nicht Teil eines Speicherstands.
+Bei einigen wenigen Spielen lassen sich das Menü oder das Popup nicht nutzen;
+die Achievements funktionieren dort trotzdem. Der Ton ist nicht Teil eines
+Speicherstands.
 
-Manche Spiele belegen die Start-Taste selbst. Reagiert **CONTINUE** im Menü nicht,
-stattdessen mit **C** bestätigen.
+Manche Spiele belegen die Start-Taste selbst. Reagiert **CONTINUE** im Menü
+nicht, stattdessen mit **C** bestätigen.
 
 ## Voraussetzungen
 
 - Mega EverDrive CORE (Krikzz) — darauf wird entwickelt und getestet.
-- Mega EverDrive PRO — seit 1.3.0 testweise unterstützt. Achievements funktionieren
-  dort laut Rückmeldung eines Testers, das Ingame-Menü läuft auf dem PRO noch nicht.
-  Rückmeldungen gern als [GitHub Issue](https://github.com/liquid-wq/mega-raw/issues).
+- Mega EverDrive PRO — testweise. Achievements funktionieren dort laut
+  Rückmeldung eines Testers; Ingame-Menü und Popup gibt es auf dem PRO noch
+  nicht. Rückmeldungen gern als
+  [GitHub Issue](https://github.com/liquid-wq/mega-raw/issues).
 - Andere Modelle sind ungetestet.
 - Original Mega Drive / Genesis
 - USB-Verbindung zwischen EverDrive und PC
@@ -233,16 +210,18 @@ stattdessen mit **C** bestätigen.
 
 1. Die aktuelle Fassung herunterladen, entpacken und `mega-raw.exe` starten.
 2. Die Ersteinrichtung fragt nach der Sprache und bietet **Mapper auf SD-Karte
-   einrichten** an. Dort die SD-Karte angeben. Die eigenen Kerne für beide
-   Geräte (CORE und PRO) werden an alle Stellen kopiert, von denen die Konsole
-   lädt; jedes Gerät nimmt seine eigene Datei. Das geht auch später im
-   Hauptfenster.
+   einrichten** an. Konsole einschalten, im EverDrive-Menü lassen und das
+   EverDrive per USB verbinden – MEGA-RAW richtet die Karte dann selbst ein.
+   Ohne USB-Verbindung fragt es stattdessen nach der SD-Karte im Kartenleser.
+   Das geht auch später im Hauptfenster.
 3. Mit dem RetroAchievements-Konto anmelden. Mit **Eingeloggt bleiben** meldet
    sich das Programm beim nächsten Start selbst an; das Passwort wird nicht
    gespeichert.
-4. Karte zurück in die Konsole stecken, das EverDrive per USB verbinden und ein
-   Spiel starten.
-5. **Verbinden & Monitor starten** drücken. Das Spiel wird automatisch erkannt.
+4. Ein Spiel im EverDrive-Menü starten. MEGA-RAW erkennt es und startet die
+   Überwachung.
+
+**Update von 2.0.0:** die neue `mega-raw.exe` starten und einmal **Mapper auf
+SD-Karte einrichten** ausführen. Das Popup braucht den neuen Kern auf der Karte.
 
 ## Hardcore-Modus
 
@@ -255,6 +234,12 @@ RetroAchievements bestehen. Bis dahin wird jede Freischaltung als Softcore gebuc
 Die Grundlage ist schon vorhanden: MEGA-RAW prüft die Einrichtung vor und während
 einer Sitzung. Sind das Ingame-Menü oder Cheats des EverDrive eingeschaltet, weist
 MEGA-RAW darauf hin und bleibt bei Softcore.
+
+## Ältere Fassungen
+
+Die Qt-Fassung (1.x) und die erste Fassung vom Juli 2026, die mit gepatchten
+ROMs arbeitete, liegen im Ordner `legacy` und in den älteren Releases. Sie
+werden nicht mehr weiterentwickelt.
 
 ## Lizenz
 

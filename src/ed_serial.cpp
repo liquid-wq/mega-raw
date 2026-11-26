@@ -207,6 +207,29 @@ bool EdSerial::recover() {
     return false;
 }
 
+void (*g_vorFindEverdrive)() = nullptr;
+
+bool EdSerial::neuOeffnen() {
+    close();
+    ::Sleep(300);
+    try {
+        return open();
+    } catch (...) {
+        close();
+        return false;
+    }
+}
+
+Bytes EdSerial::sysInfoNoRecover() {
+    std::lock_guard<std::mutex> lock(lock_);
+    if (!handle_) return {};
+    clearInput();
+    write(Bytes{0x2B, 0xD4, 0x26, (uint8_t)(0x26 ^ 0xFF)});
+    Bytes r = readUpTo(64, 1000);
+    if (r.size() != 64) return {};
+    return r;
+}
+
 Bytes EdSerial::memrd(uint32_t addr, uint32_t length) {
     try {
         return memrdRaw(addr, length);
@@ -248,6 +271,196 @@ void EdSerial::memwrRaw(uint32_t addr, const Bytes& data) {
     write(Bytes(pkt.begin(), pkt.end()));
 }
 
+// ---------------------------------------------------------------------------
+// Dateizugriff ueber die MCU. Rahmen wie alle Befehle (2B D4 <Befehl>
+// <Befehl xor FF>), Ablauf je Befehl aus Krikzz' edio/everdrive.c:
+//   C5 Arg(1) Pfad        Ordner laden        -> Status
+//   C6                    Anzahl Eintraege    -> u16
+//   C8 Start Anzahl Max   Eintraege holen     -> je Eintrag Ergebnis(1) Info(9) Name
+//   C9 Modus(1) Pfad      Datei oeffnen       -> Status
+//   CA Laenge(4)          lesen               -> Ergebnis(1), Daten
+//   CC Laenge(4)          schreiben           -> je 1024 Byte erst Ergebnis(1), dann Daten; Status
+//   CE                    schliessen          -> Status
+//   D0 Pfad               Dateiinfo           -> Ergebnis(1) Info(9) Name
+//   D2 Pfad               Ordner anlegen      -> Status
+//   D3 Pfad               loeschen            -> Status
+// Pfad = Laenge(2) + Text, Info = Groesse(4) Datum(2) Zeit(2) Attribut(1).
+// Status = Befehl 10 -> A5 + Code.
+// ---------------------------------------------------------------------------
+namespace {
+Bytes Befehl(uint8_t c) { return Bytes{0x2B, 0xD4, c, (uint8_t)(c ^ 0xFF)}; }
+void Be16(Bytes& v, uint32_t x) { v.push_back((uint8_t)(x >> 8)); v.push_back((uint8_t)x); }
+void Be32(Bytes& v, uint32_t x) { Be16(v, x >> 16); Be16(v, x & 0xFFFF); }
+void Text(Bytes& v, const std::string& s) { Be16(v, (uint32_t)s.size()); v.insert(v.end(), s.begin(), s.end()); }
+uint32_t LiesBe32(const Bytes& b, size_t i) {
+    return ((uint32_t)b[i] << 24) | ((uint32_t)b[i + 1] << 16) | ((uint32_t)b[i + 2] << 8) | b[i + 3];
+}
+}  // namespace
+
+int EdSerial::statusRaw() {
+    write(Befehl(0x10));
+    const Bytes r = readUpTo(2, 1500);
+    if (r.size() != 2) return -1;
+    if (r[0] == 0xA5) return r[1];
+    if (r[1] == 0xA5) return r[0];
+    return -2;
+}
+
+bool EdSerial::liesEintrag(Eintrag& e) {
+    const Bytes info = readUpTo(9, 1500);
+    if (info.size() != 9) return false;
+    const Bytes nl = readUpTo(2, 1500);
+    if (nl.size() != 2) return false;
+    const int n = (nl[0] << 8) | nl[1];
+    const Bytes name = n > 0 ? readUpTo(n, 1500) : Bytes();
+    if ((int)name.size() != n) return false;
+    e.groesse = LiesBe32(info, 0);
+    e.ordner = (info[8] & 0x10) != 0;
+    e.name.assign(name.begin(), name.end());
+    return true;
+}
+
+int EdSerial::ordnerListe(const std::string& pfad, std::vector<Eintrag>& aus, int maxEintraege) {
+    std::lock_guard<std::mutex> lock(lock_);
+    aus.clear();
+    if (!handle_) return -1;
+    clearInput();
+    Bytes c = Befehl(0xC5);
+    c.push_back(0x00);
+    Text(c, pfad);
+    write(c);
+    const int st = statusRaw();
+    if (st != 0) return st;
+    write(Befehl(0xC6));
+    const Bytes r = readUpTo(2, 1500);
+    if (r.size() != 2) return -3;
+    int n = (r[0] << 8) | r[1];
+    if (n > maxEintraege) n = maxEintraege;
+    if (n == 0) return 0;
+    Bytes g = Befehl(0xC8);
+    Be16(g, 0);
+    Be16(g, (uint32_t)n);
+    Be16(g, 255);
+    write(g);
+    for (int i = 0; i < n; ++i) {
+        const Bytes e = readUpTo(1, 1500);
+        if (e.size() != 1) return -4;
+        if (e[0] != 0) return e[0];
+        Eintrag x;
+        if (!liesEintrag(x)) return -5;
+        aus.push_back(std::move(x));
+    }
+    return 0;
+}
+
+int EdSerial::ordnerAnlegen(const std::string& pfad) {
+    std::lock_guard<std::mutex> lock(lock_);
+    if (!handle_) return -1;
+    clearInput();
+    Bytes c = Befehl(0xD2);
+    Text(c, pfad);
+    write(c);
+    return statusRaw();
+}
+
+int EdSerial::loeschen(const std::string& pfad) {
+    std::lock_guard<std::mutex> lock(lock_);
+    if (!handle_) return -1;
+    clearInput();
+    Bytes c = Befehl(0xD3);
+    Text(c, pfad);
+    write(c);
+    return statusRaw();
+}
+
+int EdSerial::dateiInfo(const std::string& pfad, Eintrag& aus) {
+    std::lock_guard<std::mutex> lock(lock_);
+    if (!handle_) return -1;
+    clearInput();
+    Bytes c = Befehl(0xD0);
+    Text(c, pfad);
+    write(c);
+    const Bytes e = readUpTo(1, 1500);
+    if (e.size() != 1) return -3;
+    if (e[0] != 0) return e[0];
+    return liesEintrag(aus) ? 0 : -5;
+}
+
+int EdSerial::dateiSchreiben(const std::string& pfad, const Bytes& daten) {
+    std::lock_guard<std::mutex> lock(lock_);
+    if (!handle_) return -1;
+    clearInput();
+    Bytes c = Befehl(0xC9);
+    c.push_back(0x0A);   // FA_WRITE | FA_CREATE_ALWAYS
+    Text(c, pfad);
+    write(c);
+    int st = statusRaw();
+    if (st != 0) return st;
+    Bytes w = Befehl(0xCC);
+    Be32(w, (uint32_t)daten.size());
+    write(w);
+    int fehler = 0;
+    for (size_t pos = 0; pos < daten.size(); pos += 1024) {
+        const Bytes e = readUpTo(1, 5000);
+        if (e.size() != 1) { fehler = -4; break; }
+        if (e[0] != 0) { fehler = e[0]; break; }
+        const size_t n = std::min<size_t>(1024, daten.size() - pos);
+        write(Bytes(daten.begin() + pos, daten.begin() + pos + n));
+    }
+    if (fehler == 0) fehler = statusRaw();
+    write(Befehl(0xCE));
+    st = statusRaw();
+    return fehler != 0 ? fehler : st;
+}
+
+int EdSerial::dateiLesen(const std::string& pfad, uint32_t groesse, Bytes& aus) {
+    std::lock_guard<std::mutex> lock(lock_);
+    aus.clear();
+    if (!handle_) return -1;
+    clearInput();
+    Bytes c = Befehl(0xC9);
+    c.push_back(0x01);   // FA_READ
+    Text(c, pfad);
+    write(c);
+    int st = statusRaw();
+    if (st != 0) return st;
+    int fehler = 0;
+    aus.reserve(groesse);
+    while (aus.size() < groesse) {
+        const uint32_t n = std::min<uint32_t>(512, groesse - (uint32_t)aus.size());
+        Bytes r = Befehl(0xCA);
+        Be32(r, n);
+        write(r);
+        const Bytes e = readUpTo(1, 2000);
+        if (e.size() != 1) { fehler = -4; break; }
+        if (e[0] != 0) { fehler = e[0]; break; }
+        const Bytes teil = readUpTo((int)n, 3000);
+        if (teil.size() != n) { fehler = -6; break; }
+        aus.insert(aus.end(), teil.begin(), teil.end());
+    }
+    write(Befehl(0xCE));
+    st = statusRaw();
+    return fehler != 0 ? fehler : st;
+}
+
+int EdSerial::romPfad(std::string& aus) {
+    std::lock_guard<std::mutex> lock(lock_);
+    aus.clear();
+    if (!handle_) return -1;
+    clearInput();
+    Bytes c = Befehl(0x31);
+    c.push_back(0x00);   // path_type 0 = ROM
+    write(c);
+    const Bytes l = readUpTo(2, 1500);
+    if (l.size() != 2) return -3;
+    const int n = (l[0] << 8) | l[1];
+    if (n <= 0 || n > 1024) return -5;
+    const Bytes s = readUpTo(n, 1500);
+    if ((int)s.size() != n) return -4;
+    aus.assign(s.begin(), s.end());
+    return statusRaw();
+}
+
 std::vector<SerialPortInfo> availableSerialPorts() {
     std::vector<SerialPortInfo> aus;
     HDEVINFO info = ::SetupDiGetClassDevsW(&GUID_DEVCLASS_PORTS, nullptr, nullptr, DIGCF_PRESENT);
@@ -286,6 +499,7 @@ std::vector<SerialPortInfo> availableSerialPorts() {
 
 std::pair<std::unique_ptr<EdSerial>, std::string> find_everdrive(const std::string& preferred,
                                                                   std::vector<std::string>* versuche) {
+    if (g_vorFindEverdrive) g_vorFindEverdrive();
     // Reihenfolge: zuerst der vorgemerkte Port, dann echte USB-Geraete
     // (mit Hersteller-Kennung), zuletzt virtuelle Ports. Bluetooth-Ports
     // lassen sich oeffnen, antworten aber nie - jeder Fehlversuch kostet

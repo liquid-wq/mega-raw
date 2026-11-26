@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -132,9 +133,19 @@ bool warteKopieStatus(mdsnoop::MdSnoop& snoop, bool wirksam) {
 }  // namespace
 
 MonitorWorker::MonitorWorker(std::string port, Game game, std::string user, std::string token,
-                             std::shared_ptr<RaClient> client, bool hardcore)
+                             std::shared_ptr<RaClient> client, bool hardcore, bool popupImSpiel)
     : hardcore_(hardcore), port_(std::move(port)), game_(std::move(game)),
-      user_(std::move(user)), token_(std::move(token)), client_(std::move(client)) {}
+      user_(std::move(user)), token_(std::move(token)), client_(std::move(client)) {
+    popupImSpiel_ = popupImSpiel;
+    zusatz_ = std::make_unique<zusatz::Steuerung>();
+    // Meldungen der Erweiterung nur in die Diagnose; mit test.ini auch ins Log
+    zusatz_->log = [this](const std::string& s) {
+        diagZeile("ZUSATZ " + s);
+        static const bool testBau = Existiert(Datei("test.ini"));
+        if (testBau && log) log(Zweisprachig("TEST: " + s));
+    };
+    popupTestErlaubt_ = testSchalter("popuptest") == "1";
+}
 
 MonitorWorker::~MonitorWorker() {
     running_ = false;
@@ -194,6 +205,19 @@ std::string MonitorWorker::schreibeBericht(const std::vector<std::string>& zeile
     for (const std::string& z : zeilen) diagZeile("CHECK " + z);
     if (datei) diagSichern();
     return pfad;
+}
+
+
+// Warum es in dieser Sitzung keine Einblendung im Spiel gibt (Diagnose, mit test.ini auch Log)
+void MonitorWorker::popupGrundMelden(const hookcopy::Programm& p, const std::string& name) {
+    if (!zusatz::verfuegbar() || zusatz::aktiv(p)) return;
+    std::string g;
+    if (!popupImSpiel_) g = "Option aus";
+    else if (plattform_ != 1) g = "kein Mega EverDrive CORE";
+    else if (coreBuild_ < 137) g = "Kern " + Num(coreBuild_) + " im Spielordner, braucht 137 - Mapper auf SD-Karte einrichten";
+    else if (name != "W+F+P") g = "Modus " + name + " (Popup nur bei W+F+P)";
+    else g = "Programm mit Popup zu gross (ohne Popup Last " + Num(p.takte) + ")";
+    zusatz_->log("Popup bei diesem Spiel aus: " + g);
 }
 
 void MonitorWorker::richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<uint32_t>& addrs, bool zuordnungOk) {
@@ -297,9 +321,18 @@ void MonitorWorker::richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<ui
         try {
             // Nach einem Versuch mit Bildpuffer die normale Zuordnung zurueck
             if (!v.ring && zuordnungWeg) { snoop.program(addrs); zuordnungWeg = false; }
+            zusatz_->aus();
             hookcopy::Programm p;
             try {
-                p = hookcopy::erzeuge(weg, addrs, v.ring, v.post, v.hint);
+                // Einblendung im Spiel: nur CORE und Mapper ab Build 137, sonst ohne
+                const bool mitZusatz = popupImSpiel_ && plattform_ == 1 && coreBuild_ >= 137 && zusatz::verfuegbar();
+                try {
+                    p = hookcopy::erzeuge(weg, addrs, v.ring, v.post, v.hint, mitZusatz, true);
+                } catch (const hookcopy::HookCopyError&) {
+                    if (!mitZusatz) throw;
+                    // Grosse Sets: lieber ohne Erweiterung als gar nicht
+                    p = hookcopy::erzeuge(weg, addrs, v.ring, v.post, v.hint);
+                }
             } catch (const hookcopy::HookCopyError&) {
                 grund = T("zu viele Adressen");
             }
@@ -319,8 +352,10 @@ void MonitorWorker::richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<ui
                 int abw = 0;
                 for (size_t i = 0; i < prog.size(); ++i)
                     if (i >= zurueck.size() || zurueck[i] != prog[i]) ++abw;
+                abw += zusatz_->hochladen(snoop, p);
                 if (abw) grund = Fmt(T("Übertragung fehlerhaft (%1 Abweichungen)"), {Num(abw)});
             }
+            if (grund.empty()) zusatz_->vorbereiten(snoop, p);
             if (grund.empty()) {
                 if (v.ring) {
                     snoop.programRing((int)((p.groesse + hookcopy::kBlock - 1) / hookcopy::kBlock));
@@ -336,12 +371,18 @@ void MonitorWorker::richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<ui
             if (grund.empty() && v.ring) {
                 // Pruefung im zuletzt vollstaendigen Bild. Laeuft der Zaehler
                 // nicht weiter, wird das Programm nicht bis zum Ende ausgefuehrt.
-                Schlafe(200);
-                const int g1 = snoop.ringStatus() & 0x7F;
-                Schlafe(100);
-                const uint8_t s2 = snoop.ringStatus();
-                const int g2 = s2 & 0x7F;
-                const int lauf = (g2 - g1 + 128) % 128;
+                // Steht der Zaehler, bis zu dreimal neu pruefen (laengeres
+                // Fenster), bevor der naechste Modus versucht wird.
+                int g1 = 0, g2 = 0, lauf = 0;
+                for (int ver = 0; ver < 3 && running_; ++ver) {
+                    Schlafe(ver == 0 ? 200 : 500);
+                    g1 = snoop.ringStatus() & 0x7F;
+                    Schlafe(ver == 0 ? 100 : 300);
+                    g2 = snoop.ringStatus() & 0x7F;
+                    lauf = (g2 - g1 + 128) % 128;
+                    if (lauf > 0) break;
+                    bericht.push_back("mode " + name + "   : frame counter still, check " + Num(ver + 1) + "/3");
+                }
                 const int letzte = (g2 - 1 + 128) % 128;
                 const Bytes bild = snoop.readRing(letzte, p.abschnitt, (int)p.groesse);
                 const int g3 = snoop.ringStatus() & 0x7F;
@@ -372,6 +413,7 @@ void MonitorWorker::richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<ui
                     ringPruef_ = p.pruefPos;
                     ringSp_ = p.spPos;
                     ringStapel_ = p.stapel;
+                    zusatz_->aktivieren(p);
                     spHisto_.clear();                    // Ruhewert je Modus neu bestimmen
                     spRuhe_ = 0;
                     ringPost_ = v.post;
@@ -386,6 +428,7 @@ void MonitorWorker::richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<ui
                     ringLetzte_ = -1;
                     ringLuecke_ = false;
                     emitLog(BEIDE(Fmt(T("Werte-Auslesung: Modus %1 aktiv (Last %2)."), {name, Num(p.takte)})));
+                    popupGrundMelden(p, name);
                     bericht.push_back("frame ring : " + Num(p.tiefe) + " frames x " + Num(p.abschnitt) + " bytes");
                     bericht.push_back("result     : mode " + name + " active");
                     schreibeBericht(bericht, false);
@@ -418,6 +461,7 @@ void MonitorWorker::richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<ui
                     kopierWeg_ = nr;
                     diagPruef_ = p.pruefOff;
                     emitLog(BEIDE(Fmt(T("Werte-Auslesung: Modus %1 aktiv (Last %2)."), {name, Num(p.takte)})));
+                    popupGrundMelden(p, name);
                     bericht.push_back("result     : mode " + name + " active");
                     schreibeBericht(bericht, false);
                     return;
@@ -433,6 +477,8 @@ void MonitorWorker::richteKopieEin(mdsnoop::MdSnoop& snoop, const std::vector<ui
     }
 
     // Kein Weg hat getragen: Programm aus, alter Mitschnitt, Bericht.
+    zusatz_->aus();
+    if (zusatz::verfuegbar()) zusatz_->log("Popup bei diesem Spiel aus: kein Kopierweg verwendbar");
     try {
         snoop.cpyEnable(false);
         warteKopieStatus(snoop, false);
@@ -685,9 +731,8 @@ void MonitorWorker::start() {
     // lauter Nullen liefern - deshalb hier abbrechen.
     if (!coreOk) {
         emitLog(BEIDE(T("ABBRUCH: Der RA-Mapper läuft nicht auf der Konsole.")));
-        emitLog(BEIDE(T("Das Spiel muss mit unserem Core gestartet werden:")));
-        emitLog(BEIDE(T("  über USB   -  edlink run --file SPIEL.md --fpga mega-core.x25   (PRO: mega-pro.rbf)")));
-        emitLog(BEIDE(T("  über SD    -  mega-core.x25 (CORE) bzw. mega-pro.rbf (PRO) in denselben Ordner wie das ROM legen")));
+        emitLog(BEIDE(T("Das Spiel muss mit dem MEGA-RAW-Mapper gestartet werden:")));
+        emitLog(BEIDE(T("  Dafür einmal \"Mapper auf SD-Karte einrichten...\" ausführen und das Spiel danach neu starten.")));
         if (coreMissing) coreMissing();
         ed.close();
         if (finished) finished();
@@ -724,8 +769,29 @@ void MonitorWorker::start() {
                     wechselUhr_.restart();
                 }
             }
+            // Nur Test (test.ini popupauto=N): N s nach jedem fertigen Popup ein neues
+            static const int popupAutoS = std::atoi(testSchalter("popupauto").c_str());
+            if (popupAutoS > 0) {
+                if (!zusatz_->frei()) popupAutoUhr_.start();
+                else if (popupAutoUhr_.isValid() && popupAutoUhr_.elapsed() >= popupAutoS * 1000LL) {
+                    popupTestWunsch_ = true;
+                    popupAutoUhr_.start();
+                }
+            }
+            zusatz_->takt(snoop);
+            if (popupTestWunsch_.exchange(false)) {
+                std::string titel = "Achievement";
+                {
+                    std::lock_guard<std::mutex> lk(gameMtx_);
+                    if (!game_.achievements.empty())
+                        titel = game_.achievements[std::rand() % game_.achievements.size()].title;
+                }
+                emitLog("TEST: popup \"" + titel + "\"");
+                zusatz_->freigeschaltet(titel);
+            }
             if (coreTakt.elapsed() >= 1000) {
                 coreTakt.restart();
+                zusatz_->sekunde(snoop);
                 const uint8_t b = snoop.build();
                 coreWeg = (b == 0 || b == 0xFF) ? coreWeg + 1 : 0;
                 if (coreWeg >= 2) {
@@ -856,6 +922,7 @@ void MonitorWorker::start() {
                         const bool hit = ac.rt->update(ram, prevRam_);
                         if (!hit) continue;
                         ac.triggered = true;
+                        zusatz_->freigeschaltet(ac.title);
                         {
                             // Neben die EXE, nicht in den Arbeitsordner des Aufrufers
                             std::ofstream tl(fs::u8path(Datei("trigger_log.txt")), std::ios::app);
@@ -983,6 +1050,8 @@ void MonitorWorker::start() {
                         ringLuecke_ = true;
                         continue;
                     }
+                    // Erweiterungen: Lesefenster, Stand, unterbrochener PC
+                    zusatz_->bild(snoop, bild);
                     // Nach einer Luecke fehlen Bilder, in denen eine
                     // Ruecksetzbedingung gegolten haben kann: alle Trefferzaehler
                     // auf 0. Verglichen wird das erste Bild danach mit dem letzten
@@ -1104,7 +1173,10 @@ void MonitorWorker::start() {
     // Kopierprogramm abschalten - aber nur, solange unser Core noch laeuft.
     if (kopierWeg_ != 0) {
         try {
-            if (snoop.build() == coreBuild_) snoop.cpyEnable(false);
+            if (snoop.build() == coreBuild_) {
+                zusatz_->aufraeumen(snoop);
+                snoop.cpyEnable(false);
+            }
         } catch (...) {}
         kopierWeg_ = 0;
         ring_ = false;
