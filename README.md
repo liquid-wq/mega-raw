@@ -13,7 +13,7 @@ menu along.
 
 **Project page: https://liquid-wq.github.io/mega-raw/**
 
-![An achievement popping up on the TV while the game runs](docs/megaraw_popup.gif)
+![An achievement popping up on the TV while the game runs](https://raw.githubusercontent.com/liquid-wq/mega-raw/198f48a670048f26907401fd8e25bb06912daf56/docs/megaraw_popup.gif)
 
 *An achievement popping up on the console's own picture.*
 
