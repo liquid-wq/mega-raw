@@ -61,8 +61,7 @@ over USB, and MEGA-RAW checks the RetroAchievements conditions there.
 
 ### Known limits
 
-A few games cannot open the menu or show the popup; achievements still work
-there. Sound is not part of a save state.
+A few games cannot open the menu, and sound is not part of a save state.
 
 Some games use the Start button themselves. If **Continue** does not react in
 the menu, confirm with **C** instead.
@@ -186,9 +185,8 @@ RetroAchievements.
 
 ### Bekannte Einschränkungen
 
-Bei einigen wenigen Spielen lassen sich das Menü oder das Popup nicht nutzen;
-die Achievements funktionieren dort trotzdem. Der Ton ist nicht Teil eines
-Speicherstands.
+Bei einigen wenigen Spielen lässt sich das Menü nicht öffnen, und der Ton ist
+nicht Teil eines Speicherstands.
 
 Manche Spiele belegen die Start-Taste selbst. Reagiert **CONTINUE** im Menü
 nicht, stattdessen mit **C** bestätigen.
